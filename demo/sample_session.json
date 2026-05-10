@@ -1,0 +1,86 @@
+{
+  "voice_memos_hidden": [
+    "Today I kept checking my phone after someone disappeared.",
+    "I do not know why I wait when someone disappears.",
+    "When I was little, I sat near the window waiting for my mom to come home.",
+    "I remember her hair, her eyes, and the way her smile changed when she came in.",
+    "I remember being little and feeling proud when I pooped because my mom smiled.",
+    "The room was quiet. There was light outside. I thought if I was quiet and good, she would come back happy."
+  ],
+  "visible_user_note": "I noticed the phone today led me back to the window in the old apartment. I also remembered her hair and smile. I remembered feeling proud when my mom smiled.",
+  "gemma_candidate_nouns": [
+    {
+      "noun": "PHONE",
+      "scene_type": "current_trigger",
+      "visible_reason": "This noun appeared in a current scene that the user associated with earlier mother-related memories.",
+      "confidence": "medium"
+    },
+    {
+      "noun": "WINDOW",
+      "scene_type": "mom_left",
+      "visible_reason": "This noun appeared in a current scene or childhood/mother-related part of your conversation.",
+      "confidence": "medium"
+    },
+    {
+      "noun": "HAIR",
+      "scene_type": "with_mom",
+      "visible_reason": "This noun appeared near a remembered appearance detail in a childhood/mother-related part of your conversation.",
+      "confidence": "medium"
+    },
+    {
+      "noun": "EYES",
+      "scene_type": "with_mom",
+      "visible_reason": "This noun appeared near a remembered appearance detail in a childhood/mother-related part of your conversation.",
+      "confidence": "medium"
+    },
+    {
+      "noun": "SMILE",
+      "scene_type": "with_mom",
+      "visible_reason": "This noun appeared near a remembered appearance detail in a childhood/mother-related part of your conversation.",
+      "confidence": "medium"
+    },
+    {
+      "noun": "EXCREMENT",
+      "scene_type": "what_mom_wanted",
+      "visible_reason": "This noun appeared near an early childhood bodily-control scene connected to mother, play, offering, or making mother happy.",
+      "confidence": "medium"
+    },
+    {
+      "noun": "ROOM",
+      "scene_type": "mom_left",
+      "visible_reason": "This noun appeared in a current scene or childhood/mother-related part of your conversation.",
+      "confidence": "medium"
+    },
+    {
+      "noun": "LIGHT",
+      "scene_type": "mom_left",
+      "visible_reason": "This noun appeared in a current scene or childhood/mother-related part of your conversation.",
+      "confidence": "low"
+    }
+  ],
+  "user_action": {
+    "keep": [
+      "WINDOW",
+      "PHONE",
+      "HAIR",
+      "EXCREMENT"
+    ],
+    "delete": [
+      "LIGHT"
+    ],
+    "linked_notes": {
+      "WINDOW": [
+        "I noticed the phone today led me back to the window in the old apartment. I also remembered her hair and smile. I remembered feeling proud when my mom smiled."
+      ],
+      "PHONE": [
+        "I noticed the phone today led me back to the window in the old apartment. I also remembered her hair and smile. I remembered feeling proud when my mom smiled."
+      ],
+      "HAIR": [
+        "I noticed the phone today led me back to the window in the old apartment. I also remembered her hair and smile. I remembered feeling proud when my mom smiled."
+      ],
+      "EXCREMENT": [
+        "I noticed the phone today led me back to the window in the old apartment. I also remembered her hair and smile. I remembered feeling proud when my mom smiled."
+      ]
+    }
+  }
+}
