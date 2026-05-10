@@ -66,6 +66,12 @@ This package contains a runnable local prototype skeleton:
 - prompt pack
 - schema and safety policy
 
+The intended product direction is a native Android app. See:
+
+- [ANDROID_APP_PLAN.md](ANDROID_APP_PLAN.md)
+- [ANDROID_DATA_MODEL.md](ANDROID_DATA_MODEL.md)
+- [ANDROID_MOCKUPS.md](ANDROID_MOCKUPS.md)
+
 ## Run locally
 
 ```bash
