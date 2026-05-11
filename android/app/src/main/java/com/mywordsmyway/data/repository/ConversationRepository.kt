@@ -1,0 +1,38 @@
+package com.mywordsmyway.data.repository
+
+import android.net.Uri
+import com.mywordsmyway.data.local.ConversationEntity
+import com.mywordsmyway.data.local.ConversationSummaryEntity
+import com.mywordsmyway.data.local.NoteImageEntity
+import com.mywordsmyway.data.local.NounSuggestionEntity
+import com.mywordsmyway.data.local.VoiceMemoEntity
+import com.mywordsmyway.data.model.AddMemoResult
+import com.mywordsmyway.data.model.NoteFileAttachment
+import com.mywordsmyway.data.model.StartConversationResult
+import com.mywordsmyway.data.model.WeeklyAccess
+import kotlinx.coroutines.flow.Flow
+
+interface ConversationRepository {
+    fun observeWeeklyAccess(): Flow<WeeklyAccess>
+    fun observeCurrentConversation(): Flow<ConversationEntity?>
+    fun observeConversationHistory(): Flow<List<ConversationSummaryEntity>>
+    fun observeConversation(conversationId: String): Flow<ConversationEntity?>
+    fun observeMemos(conversationId: String): Flow<List<VoiceMemoEntity>>
+    fun observeNoteImages(conversationId: String): Flow<List<NoteImageEntity>>
+    fun observeNotes(query: String, startDate: String, endDate: String): Flow<List<ConversationEntity>>
+    suspend fun startConversation(paymentAcknowledged: Boolean): StartConversationResult
+    suspend fun addMemo(
+        conversationId: String,
+        audioPath: String?,
+        durationMillis: Long? = null,
+        textFallback: String? = null,
+    ): AddMemoResult
+    suspend fun addNoteImage(conversationId: String, sourceUri: Uri): NoteImageEntity
+    suspend fun addDrawingImage(conversationId: String, pngBytes: ByteArray): NoteImageEntity
+    suspend fun addNoteFile(conversationId: String, sourceUri: Uri): NoteFileAttachment
+    suspend fun deleteNoteImage(imageId: String)
+    suspend fun updateNote(conversationId: String, title: String, finalNote: String)
+    suspend fun finishConversation(conversationId: String, title: String, finalNote: String): List<NounSuggestionEntity>
+    suspend fun deleteConversation(conversationId: String)
+    suspend fun deleteAllConversations()
+}
