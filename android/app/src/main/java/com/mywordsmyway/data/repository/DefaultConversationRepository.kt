@@ -159,6 +159,10 @@ class DefaultConversationRepository(
         conversationDao.lockConversation(conversationId, salt, hash)
     }
 
+    override suspend fun lockNoteWithDeviceAuth(conversationId: String) {
+        conversationDao.lockConversationWithDeviceAuth(conversationId)
+    }
+
     override suspend fun removeNoteLock(conversationId: String) {
         conversationDao.unlockConversation(conversationId)
     }

@@ -30,6 +30,7 @@ interface ConversationRepository {
     suspend fun deleteNoteFolder(folderId: String)
     suspend fun moveNoteToFolder(conversationId: String, folderId: String?)
     suspend fun lockNote(conversationId: String, password: String)
+    suspend fun lockNoteWithDeviceAuth(conversationId: String)
     suspend fun removeNoteLock(conversationId: String)
     suspend fun verifyNotePassword(conversationId: String, password: String): Boolean
     suspend fun addMemo(

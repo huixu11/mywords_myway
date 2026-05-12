@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.app.Activity
+import android.app.KeyguardManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas as AndroidCanvas
@@ -410,6 +412,7 @@ fun WriteNoteScreen(
     val totalDuration = remember(memos) { memos.sumOf { it.durationMillis ?: 0L } }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val deviceAuthAvailable = remember(context) { context.deviceAuthAvailable() }
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
     val imeBottom = WindowInsets.ime.getBottom(density)
@@ -444,6 +447,15 @@ fun WriteNoteScreen(
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasRecordPermission = granted
     }
+    var pendingDeviceAuthSuccess by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val deviceAuthLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            pendingDeviceAuthSuccess?.invoke()
+        } else {
+            error = "Authentication canceled."
+        }
+        pendingDeviceAuthSuccess = null
+    }
     fun insertIntoNote(snippet: String) {
         noteField = noteField.insertAtSelection(snippet)
         error = ""
@@ -474,6 +486,7 @@ fun WriteNoteScreen(
     }
     val findMatches = remember(noteField.text, findQuery) { findVisibleMatchRanges(noteField.text, findQuery) }
     val noteLocked = conversation?.isLocked == true
+    val noteHasCustomPassword = conversation?.passwordHash != null
     val contentHidden = noteLocked && !sessionUnlocked
     LaunchedEffect(findMatches.size) {
         selectedFindIndex = selectedFindIndex.coerceIn(0, (findMatches.size - 1).coerceAtLeast(0))
@@ -552,6 +565,26 @@ fun WriteNoteScreen(
                 }
         }
     }
+    fun authenticateWithDevice(
+        title: String,
+        subtitle: String,
+        onSuccess: () -> Unit,
+        onUnavailable: () -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        val keyguardManager = context.getSystemService(KeyguardManager::class.java)
+        val credentialIntent = keyguardManager?.createConfirmDeviceCredentialIntent(title, subtitle)
+        if (!deviceAuthAvailable || credentialIntent == null) {
+            onUnavailable()
+            return
+        }
+        pendingDeviceAuthSuccess = onSuccess
+        runCatching { deviceAuthLauncher.launch(credentialIntent) }
+            .onFailure {
+                pendingDeviceAuthSuccess = null
+                onError(it.message ?: "Could not open device authentication.")
+            }
+    }
     BackHandler {
         saveNote(navigateAfterSave = true, allowEmptyBack = true)
     }
@@ -598,6 +631,26 @@ fun WriteNoteScreen(
                     LockedNoteContent(
                         title = conversation?.title.orEmpty(),
                         createdAt = conversation?.createdAt,
+                        deviceAuthAvailable = deviceAuthAvailable,
+                        hasCustomPassword = noteHasCustomPassword,
+                        onViewNote = {
+                            authenticateWithDevice(
+                                title = "Unlock Note",
+                                subtitle = "Use your phone lock or fingerprint.",
+                                onSuccess = {
+                                    sessionUnlocked = true
+                                    error = ""
+                                },
+                                onUnavailable = {
+                                    if (noteHasCustomPassword) {
+                                        showUnlockDialog = true
+                                    } else {
+                                        error = "Set up a phone screen lock or fingerprint to unlock this note."
+                                    }
+                                },
+                                onError = { message -> error = message },
+                            )
+                        },
                         onEnterPassword = { showUnlockDialog = true },
                     )
                     ErrorText(error)
@@ -779,7 +832,27 @@ fun WriteNoteScreen(
 
     if (showLockDialog) {
         PasswordLockDialog(
+            deviceAuthAvailable = deviceAuthAvailable,
             onDismiss = { showLockDialog = false },
+            onUseDeviceAuth = {
+                authenticateWithDevice(
+                    title = "Lock Note",
+                    subtitle = "Use your phone lock or fingerprint to protect this note.",
+                    onSuccess = {
+                        scope.launch {
+                            viewModel.lockNoteWithDeviceAuth(conversationId)
+                                .onSuccess {
+                                    sessionUnlocked = true
+                                    savedNotice = "Locked with phone lock"
+                                    showLockDialog = false
+                                }
+                                .onFailure { error = it.message ?: "Could not lock note." }
+                        }
+                    },
+                    onUnavailable = { error = "Set up a phone screen lock or fingerprint to use this lock method." },
+                    onError = { message -> error = message },
+                )
+            },
             onLock = { password ->
                 scope.launch {
                     viewModel.lockNote(conversationId, password)
@@ -796,7 +869,21 @@ fun WriteNoteScreen(
 
     if (showUnlockDialog) {
         PasswordUnlockDialog(
+            hasCustomPassword = noteHasCustomPassword,
             onDismiss = { showUnlockDialog = false },
+            onUseDeviceAuth = {
+                authenticateWithDevice(
+                    title = "Unlock Note",
+                    subtitle = "Use your phone lock or fingerprint.",
+                    onSuccess = {
+                        sessionUnlocked = true
+                        showUnlockDialog = false
+                        error = ""
+                    },
+                    onUnavailable = { error = "Set up a phone screen lock or fingerprint to unlock this note." },
+                    onError = { message -> error = message },
+                )
+            },
             onUnlock = { password, onInvalid ->
                 scope.launch {
                     viewModel.verifyNotePassword(conversationId, password)
@@ -2207,6 +2294,9 @@ private fun NoteTopBar(
 private fun LockedNoteContent(
     title: String,
     createdAt: java.time.Instant?,
+    deviceAuthAvailable: Boolean,
+    hasCustomPassword: Boolean,
+    onViewNote: () -> Unit,
     onEnterPassword: () -> Unit,
 ) {
     Column(
@@ -2221,9 +2311,21 @@ private fun LockedNoteContent(
         createdAt?.let {
             Text(formatDate(it), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text("This note is locked.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Button(onClick = onEnterPassword) {
-            Text("Enter Password")
+        Text(
+            if (deviceAuthAvailable) {
+                "This note is locked. Use your phone lock or fingerprint to view it."
+            } else {
+                "This note is locked."
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(onClick = onViewNote) {
+            Text(if (deviceAuthAvailable) "View Note" else "Unlock Note")
+        }
+        if (hasCustomPassword) {
+            TextButton(onClick = onEnterPassword) {
+                Text("Use Password")
+            }
         }
     }
 }
@@ -2598,37 +2700,53 @@ private fun InlineNoteAttachments(
 
 @Composable
 private fun PasswordLockDialog(
+    deviceAuthAvailable: Boolean,
     onDismiss: () -> Unit,
+    onUseDeviceAuth: () -> Unit,
     onLock: (String) -> Unit,
 ) {
     var password by rememberSaveable { mutableStateOf("") }
     var confirm by rememberSaveable { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf("") }
+    var useCustomPassword by rememberSaveable { mutableStateOf(!deviceAuthAvailable) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Lock with password") },
+        title = { Text("Lock Note") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = {
-                        password = it
-                        error = ""
-                    },
-                    singleLine = true,
-                    label = { Text("Password") },
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-                OutlinedTextField(
-                    value = confirm,
-                    onValueChange = {
-                        confirm = it
-                        error = ""
-                    },
-                    singleLine = true,
-                    label = { Text("Confirm password") },
-                    visualTransformation = PasswordVisualTransformation(),
-                )
+                if (!useCustomPassword) {
+                    Text("Use your phone password, PIN, pattern, or fingerprint to lock and unlock this note.")
+                    TextButton(onClick = { useCustomPassword = true }) {
+                        Text("Use Custom Password Instead")
+                    }
+                } else {
+                    Text("Create a custom password for this note.")
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = {
+                            password = it
+                            error = ""
+                        },
+                        singleLine = true,
+                        label = { Text("Password") },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    OutlinedTextField(
+                        value = confirm,
+                        onValueChange = {
+                            confirm = it
+                            error = ""
+                        },
+                        singleLine = true,
+                        label = { Text("Confirm password") },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    if (deviceAuthAvailable) {
+                        TextButton(onClick = { useCustomPassword = false }) {
+                            Text("Use Phone Lock Instead")
+                        }
+                    }
+                }
                 if (error.isNotBlank()) {
                     Text(error, color = MaterialTheme.colorScheme.error)
                 }
@@ -2637,15 +2755,19 @@ private fun PasswordLockDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    error = when {
-                        password.length < 4 -> "Use at least 4 characters."
-                        password != confirm -> "Passwords do not match."
-                        else -> ""
+                    if (!useCustomPassword) {
+                        onUseDeviceAuth()
+                    } else {
+                        error = when {
+                            password.length < 4 -> "Use at least 4 characters."
+                            password != confirm -> "Passwords do not match."
+                            else -> ""
+                        }
+                        if (error.isBlank()) onLock(password)
                     }
-                    if (error.isBlank()) onLock(password)
                 },
             ) {
-                Text("Lock")
+                Text(if (useCustomPassword) "Lock" else "Continue")
             }
         },
         dismissButton = {
@@ -2658,7 +2780,9 @@ private fun PasswordLockDialog(
 
 @Composable
 private fun PasswordUnlockDialog(
+    hasCustomPassword: Boolean,
     onDismiss: () -> Unit,
+    onUseDeviceAuth: () -> Unit,
     onUnlock: (String, (String) -> Unit) -> Unit,
 ) {
     var password by rememberSaveable { mutableStateOf("") }
@@ -2668,16 +2792,23 @@ private fun PasswordUnlockDialog(
         title = { Text("Enter Password") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = {
-                        password = it
-                        error = ""
-                    },
-                    singleLine = true,
-                    label = { Text("Password") },
-                    visualTransformation = PasswordVisualTransformation(),
-                )
+                TextButton(onClick = onUseDeviceAuth) {
+                    Text("Use Phone Lock or Fingerprint")
+                }
+                if (hasCustomPassword) {
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = {
+                            password = it
+                            error = ""
+                        },
+                        singleLine = true,
+                        label = { Text("Password") },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                } else {
+                    Text("This note uses your phone lock. If it is unavailable, set up a screen lock or fingerprint in system settings.")
+                }
                 if (error.isNotBlank()) {
                     Text(error, color = MaterialTheme.colorScheme.error)
                 }
@@ -2686,14 +2817,16 @@ private fun PasswordUnlockDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    if (password.isBlank()) {
+                    if (!hasCustomPassword) {
+                        onUseDeviceAuth()
+                    } else if (password.isBlank()) {
                         error = "Password is required."
                     } else {
                         onUnlock(password) { message -> error = message }
                     }
                 },
             ) {
-                Text("Unlock")
+                Text(if (hasCustomPassword) "Unlock" else "Use Phone Lock")
             }
         },
         dismissButton = {
@@ -3504,6 +3637,9 @@ private val timeFormatter = DateTimeFormatter.ofPattern("h:mm a").withZone(ZoneI
 private fun formatDate(instant: java.time.Instant): String = dateFormatter.format(instant)
 
 private fun formatTime(instant: java.time.Instant): String = timeFormatter.format(instant)
+
+private fun Context.deviceAuthAvailable(): Boolean =
+    getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true
 
 private data class NoteSearchResult(
     val note: ConversationEntity,

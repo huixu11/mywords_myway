@@ -110,6 +110,10 @@ class MainViewModel(
         conversationRepository.lockNote(conversationId, password)
     }
 
+    suspend fun lockNoteWithDeviceAuth(conversationId: String): Result<Unit> = runCatching {
+        conversationRepository.lockNoteWithDeviceAuth(conversationId)
+    }
+
     suspend fun removeNoteLock(conversationId: String): Result<Unit> = runCatching {
         conversationRepository.removeNoteLock(conversationId)
     }

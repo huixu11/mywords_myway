@@ -82,6 +82,9 @@ interface ConversationDao {
     @Query("UPDATE conversations SET isLocked = 1, passwordSalt = :salt, passwordHash = :hash WHERE id = :conversationId")
     suspend fun lockConversation(conversationId: String, salt: String, hash: String)
 
+    @Query("UPDATE conversations SET isLocked = 1, passwordSalt = NULL, passwordHash = NULL WHERE id = :conversationId")
+    suspend fun lockConversationWithDeviceAuth(conversationId: String)
+
     @Query("UPDATE conversations SET isLocked = 0, passwordSalt = NULL, passwordHash = NULL WHERE id = :conversationId")
     suspend fun unlockConversation(conversationId: String)
 
