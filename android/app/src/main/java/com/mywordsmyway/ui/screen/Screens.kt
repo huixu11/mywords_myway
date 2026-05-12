@@ -468,7 +468,7 @@ fun WriteNoteScreen(
     val supportMessage = remember(title, noteField.text, recordState.safetyMessage) {
         if (containsSelfHarmThought("$title\n${noteField.text}")) SUPPORT_MESSAGE else recordState.safetyMessage
     }
-    val findMatches = remember(noteField.text, findQuery) { findMatchRanges(noteField.text, findQuery) }
+    val findMatches = remember(noteField.text, findQuery) { findVisibleMatchRanges(noteField.text, findQuery) }
     LaunchedEffect(findMatches.size) {
         selectedFindIndex = selectedFindIndex.coerceIn(0, (findMatches.size - 1).coerceAtLeast(0))
     }
@@ -667,10 +667,11 @@ fun WriteNoteScreen(
                     }
                 },
                 onReplaceAll = {
-                    if (findQuery.isNotBlank()) {
-                        val nextText = Regex(Regex.escape(findQuery.trim()), RegexOption.IGNORE_CASE)
-                            .replace(noteField.text, replaceQuery)
-                        noteField = noteField.copy(text = nextText, selection = TextRange(0))
+                    if (findMatches.isNotEmpty()) {
+                        val nextText = findMatches.asReversed().fold(noteField.text) { text, match ->
+                            text.replaceRange(match.first, match.last + 1, replaceQuery)
+                        }
+                        noteField = noteField.copy(text = nextText, selection = TextRange(nextText.length))
                         selectedFindIndex = 0
                     }
                 },
@@ -1250,7 +1251,7 @@ private class RichNoteRenderer(
     private val builder = AnnotatedString.Builder()
     private val originalToTransformed = IntArray(source.length + 1)
     private val transformedCharOriginals = mutableListOf<Int>()
-    private val findRanges = findMatchRanges(source, findQuery)
+    private val findRanges = findVisibleMatchRanges(source, findQuery)
 
     val rendered: AnnotatedString
     val offsetMapping: OffsetMapping
@@ -2834,13 +2835,65 @@ private fun containsSelfHarmThought(text: String): Boolean {
 private fun countMatches(text: String, query: String): Int {
     val clean = query.trim()
     if (clean.isEmpty()) return 0
-    return Regex(Regex.escape(clean), RegexOption.IGNORE_CASE).findAll(text).count()
+    return findVisibleMatchRanges(text, query).size
 }
 
-private fun findMatchRanges(text: String, query: String): List<IntRange> {
+private fun findVisibleMatchRanges(text: String, query: String): List<IntRange> {
     val clean = query.trim()
     if (clean.isEmpty()) return emptyList()
-    return Regex(Regex.escape(clean), RegexOption.IGNORE_CASE).findAll(text).map { it.range }.toList()
+    val visible = visibleNoteTextWithOriginalOffsets(text)
+    return Regex(Regex.escape(clean), RegexOption.IGNORE_CASE).findAll(visible.text).mapNotNull { match ->
+        val originalStart = visible.originalOffsets.getOrNull(match.range.first) ?: return@mapNotNull null
+        val originalEnd = visible.originalOffsets.getOrNull(match.range.last) ?: return@mapNotNull null
+        originalStart..originalEnd
+    }.toList()
+}
+
+private data class VisibleNoteText(
+    val text: String,
+    val originalOffsets: List<Int>,
+)
+
+private fun visibleNoteTextWithOriginalOffsets(source: String): VisibleNoteText {
+    val visible = StringBuilder()
+    val offsets = mutableListOf<Int>()
+    fun appendChar(index: Int) {
+        visible.append(source[index])
+        offsets += index
+    }
+    var lineStart = 0
+    while (lineStart < source.length) {
+        val lineEnd = source.indexOf('\n', lineStart).let { if (it == -1) source.length else it }
+        val line = source.substring(lineStart, lineEnd)
+        val prefixLength = paragraphPrefixLength(line)
+        var index = lineStart + prefixLength
+        while (index < lineEnd) {
+            when {
+                attachmentTokenRegex.find(source, index)?.takeIf { it.range.first == index && it.range.last < lineEnd } != null -> {
+                    index = requireNotNull(attachmentTokenRegex.find(source, index)).range.last + 1
+                }
+                tableTokenRegex.find(source, index)?.takeIf { it.range.first == index && it.range.last < lineEnd } != null -> {
+                    index = requireNotNull(tableTokenRegex.find(source, index)).range.last + 1
+                }
+                source.startsWith("**", index) -> index += 2
+                source.startsWith("~~", index) -> index += 2
+                source.startsWith("<u>", index) -> index += 3
+                source.startsWith("</u>", index) -> index += 4
+                source[index] == '*' -> index += 1
+                else -> {
+                    appendChar(index)
+                    index++
+                }
+            }
+        }
+        if (lineEnd < source.length) {
+            appendChar(lineEnd)
+            lineStart = lineEnd + 1
+        } else {
+            lineStart = lineEnd
+        }
+    }
+    return VisibleNoteText(visible.toString(), offsets)
 }
 
 private fun shareCurrentNote(
