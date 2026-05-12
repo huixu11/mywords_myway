@@ -11,6 +11,7 @@ import android.graphics.Color as AndroidColor
 import android.graphics.Paint
 import android.graphics.Path as AndroidPath
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -35,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -55,6 +57,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
@@ -103,6 +107,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -422,6 +427,9 @@ fun WriteNoteScreen(
     var showDrawingPad by rememberSaveable { mutableStateOf(false) }
     var showFindInNote by rememberSaveable { mutableStateOf(false) }
     var findQuery by rememberSaveable { mutableStateOf("") }
+    var findReplaceMode by rememberSaveable { mutableStateOf(false) }
+    var replaceQuery by rememberSaveable { mutableStateOf("") }
+    var selectedFindIndex by rememberSaveable { mutableStateOf(0) }
     var showLockDialog by rememberSaveable { mutableStateOf(false) }
     var noteLocked by rememberSaveable(conversationId) { mutableStateOf(false) }
     var hasRecordPermission by remember {
@@ -460,11 +468,19 @@ fun WriteNoteScreen(
     val supportMessage = remember(title, noteField.text, recordState.safetyMessage) {
         if (containsSelfHarmThought("$title\n${noteField.text}")) SUPPORT_MESSAGE else recordState.safetyMessage
     }
-    val findCount = remember(title, noteField.text, findQuery) {
-        countMatches("$title\n${noteField.text}", findQuery)
+    val findMatches = remember(noteField.text, findQuery) { findMatchRanges(noteField.text, findQuery) }
+    LaunchedEffect(findMatches.size) {
+        selectedFindIndex = selectedFindIndex.coerceIn(0, (findMatches.size - 1).coerceAtLeast(0))
+    }
+    fun closeFindInNote() {
+        showFindInNote = false
+        findQuery = ""
+        findReplaceMode = false
+        replaceQuery = ""
+        selectedFindIndex = 0
     }
     val writingMenuOpen = formatMenuOpen || attachmentMenuOpen
-    val showWritingToolbar = (imeBottom > 0 && (titleFocused || noteFocused)) || writingMenuOpen
+    val showWritingToolbar = !showFindInNote && (titleFocused || noteFocused || writingMenuOpen)
     LaunchedEffect(conversation?.id) {
         val loaded = conversation ?: return@LaunchedEffect
         if (loadedConversationId == loaded.id) return@LaunchedEffect
@@ -526,6 +542,9 @@ fun WriteNoteScreen(
                 }
         }
     }
+    BackHandler {
+        saveNote(navigateAfterSave = true, allowEmptyBack = true)
+    }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val bottomSafePadding = contentPadding.calculateBottomPadding()
@@ -547,22 +566,13 @@ fun WriteNoteScreen(
                     isLocked = noteLocked,
                     onBack = { saveNote(navigateAfterSave = true, allowEmptyBack = true) },
                     onShare = { shareCurrentNote(context, title, noteField.text, images.size, memos.size) },
-                    onFind = { showFindInNote = true },
+                    onFind = {
+                        focusManager.clearFocus()
+                        showFindInNote = true
+                    },
                     onLock = { showLockDialog = true },
                     onSave = { saveNote(navigateAfterSave = true) },
                 )
-                if (showFindInNote) {
-                    Spacer(Modifier.height(8.dp))
-                    FindInNoteBar(
-                        query = findQuery,
-                        matchCount = findCount,
-                        onQueryChange = { findQuery = it },
-                        onClose = {
-                            showFindInNote = false
-                            findQuery = ""
-                        },
-                    )
-                }
                 if (savedNotice.isNotBlank()) {
                     Spacer(Modifier.height(6.dp))
                     Text(savedNotice, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
@@ -587,7 +597,10 @@ fun WriteNoteScreen(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .onFocusChanged { titleFocused = it.isFocused },
+                        .onFocusChanged {
+                            titleFocused = it.isFocused
+                            if (it.isFocused && showFindInNote) closeFindInNote()
+                        },
                     decorationBox = { innerTextField ->
                         Box {
                             if (title.isBlank()) {
@@ -611,7 +624,15 @@ fun WriteNoteScreen(
                     memos = memos,
                     images = images,
                     activeInlineFormats = activeInlineFormatNames.mapNotNull { runCatching { NoteFormat.valueOf(it) }.getOrNull() }.toSet(),
-                    onFocusChange = { noteFocused = it },
+                    findQuery = findQuery.takeIf { showFindInNote }.orEmpty(),
+                    selectedFindRange = findMatches.getOrNull(selectedFindIndex),
+                    onFocusChange = {
+                        noteFocused = it
+                        if (it && showFindInNote) closeFindInNote()
+                    },
+                    onEditorTap = {
+                        if (showFindInNote) closeFindInNote()
+                    },
                     onDeleteAudio = { memoId -> scope.launch { viewModel.deleteMemoAudio(memoId) } },
                     onDeleteImage = { imageId -> scope.launch { viewModel.deleteNoteImage(imageId) } },
                     modifier = Modifier
@@ -622,7 +643,64 @@ fun WriteNoteScreen(
             }
         }
 
-        if (showWritingToolbar) {
+        if (showFindInNote) {
+            FindInNoteToolbar(
+                query = findQuery,
+                replaceQuery = replaceQuery,
+                replaceMode = findReplaceMode,
+                matchCount = findMatches.size,
+                selectedIndex = selectedFindIndex,
+                onReplaceModeChange = { findReplaceMode = it },
+                onQueryChange = {
+                    findQuery = it
+                    selectedFindIndex = 0
+                },
+                onReplaceQueryChange = { replaceQuery = it },
+                onReplaceCurrent = {
+                    findMatches.getOrNull(selectedFindIndex)?.let { match ->
+                        noteField = noteField.replaceTextRange(
+                            start = match.first,
+                            end = match.last + 1,
+                            replacement = replaceQuery,
+                            selectionStart = match.first + replaceQuery.length,
+                        )
+                    }
+                },
+                onReplaceAll = {
+                    if (findQuery.isNotBlank()) {
+                        val nextText = Regex(Regex.escape(findQuery.trim()), RegexOption.IGNORE_CASE)
+                            .replace(noteField.text, replaceQuery)
+                        noteField = noteField.copy(text = nextText, selection = TextRange(0))
+                        selectedFindIndex = 0
+                    }
+                },
+                onPrevious = {
+                    if (findMatches.isNotEmpty()) {
+                        val nextIndex = if (selectedFindIndex == 0) findMatches.lastIndex else selectedFindIndex - 1
+                        selectedFindIndex = nextIndex
+                        findMatches[nextIndex].let { match -> noteField = noteField.copy(selection = TextRange(match.first, match.last + 1)) }
+                    }
+                },
+                onNext = {
+                    if (findMatches.isNotEmpty()) {
+                        val nextIndex = if (selectedFindIndex >= findMatches.lastIndex) 0 else selectedFindIndex + 1
+                        selectedFindIndex = nextIndex
+                        findMatches[nextIndex].let { match -> noteField = noteField.copy(selection = TextRange(match.first, match.last + 1)) }
+                    }
+                },
+                onClose = {
+                    closeFindInNote()
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .imePadding()
+                    .padding(
+                        start = 12.dp,
+                        end = 12.dp,
+                        bottom = 8.dp,
+                    ),
+            )
+        } else if (showWritingToolbar) {
             WritingAccessoryToolbar(
                 isAddingImage = isAddingImage,
                 formatMenuOpen = formatMenuOpen,
@@ -640,10 +718,11 @@ fun WriteNoteScreen(
                 onDraw = { showDrawingPad = true },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    .imePadding()
                     .padding(
                         start = 16.dp,
                         end = 16.dp,
-                        bottom = if (imeBottom > 0) imeBottomPadding + 8.dp else contentPadding.calculateBottomPadding() + 12.dp,
+                        bottom = if (titleFocused || noteFocused) 8.dp else contentPadding.calculateBottomPadding() + 12.dp,
                     ),
             )
         } else {
@@ -1153,17 +1232,25 @@ private fun TextFieldValue.wrapSelection(prefix: String, suffix: String, placeho
     )
 }
 
-private object RichNoteVisualTransformation : VisualTransformation {
+private class RichNoteVisualTransformation(
+    private val findQuery: String = "",
+    private val selectedFindRange: IntRange? = null,
+) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
-        val renderer = RichNoteRenderer(text.text)
+        val renderer = RichNoteRenderer(text.text, findQuery, selectedFindRange)
         return TransformedText(renderer.rendered, renderer.offsetMapping)
     }
 }
 
-private class RichNoteRenderer(private val source: String) {
+private class RichNoteRenderer(
+    private val source: String,
+    findQuery: String = "",
+    private val selectedFindRange: IntRange? = null,
+) {
     private val builder = AnnotatedString.Builder()
     private val originalToTransformed = IntArray(source.length + 1)
     private val transformedCharOriginals = mutableListOf<Int>()
+    private val findRanges = findMatchRanges(source, findQuery)
 
     val rendered: AnnotatedString
     val offsetMapping: OffsetMapping
@@ -1323,7 +1410,7 @@ private class RichNoteRenderer(private val source: String) {
 
     private fun appendVisible(originalIndex: Int, style: SpanStyle) {
         originalToTransformed[originalIndex] = builder.length
-        builder.withStyle(style) {
+        builder.withStyle(style.mergedWithFindStyle(originalIndex)) {
             append(source[originalIndex])
         }
         transformedCharOriginals.add(originalIndex)
@@ -1336,8 +1423,10 @@ private class RichNoteRenderer(private val source: String) {
             originalToTransformed[index] = builder.length + (index - start)
             transformedCharOriginals.add(index)
         }
-        builder.withStyle(style) {
-            append(source.substring(start, end))
+        for (index in start until end) {
+            builder.withStyle(style.mergedWithFindStyle(index)) {
+                append(source[index])
+            }
         }
         originalToTransformed[end] = builder.length
     }
@@ -1348,6 +1437,16 @@ private class RichNoteRenderer(private val source: String) {
         }
         repeat(text.length) {
             transformedCharOriginals.add(anchorOriginal)
+        }
+    }
+
+    private fun SpanStyle.mergedWithFindStyle(originalIndex: Int): SpanStyle {
+        val inSelected = selectedFindRange?.let { originalIndex in it } == true
+        val inMatch = inSelected || findRanges.any { originalIndex in it }
+        return when {
+            inSelected -> merge(SpanStyle(background = Color(0xFFFFC107), color = Color.Black))
+            inMatch -> merge(SpanStyle(background = Color(0xFFFFF59D), color = Color.Black))
+            else -> this
         }
     }
 }
@@ -1412,6 +1511,7 @@ private fun Modifier.noteBlankTapTarget(
     value: TextFieldValue,
     contentHeightPx: Int,
     insertSingleRowOnly: Boolean,
+    onEditorTap: () -> Unit,
     onValueChange: (TextFieldValue) -> Unit,
     focusRequester: FocusRequester,
     keyboardController: SoftwareKeyboardController?,
@@ -1420,6 +1520,7 @@ private fun Modifier.noteBlankTapTarget(
         .heightIn(min = noteEditorMinHeight)
         .pointerInput(value.text, contentHeightPx, focusRequester) {
             detectTapGestures { offset ->
+                onEditorTap()
                 if (offset.y <= contentHeightPx) return@detectTapGestures
                 val lineHeightPx = noteEditorLineHeight.toPx().coerceAtLeast(1f)
                 val missingRows = if (insertSingleRowOnly) {
@@ -1447,8 +1548,11 @@ private fun NoteDocumentEditor(
     images: List<NoteImageEntity>,
     activeInlineFormats: Set<NoteFormat>,
     onFocusChange: (Boolean) -> Unit,
+    onEditorTap: () -> Unit,
     onDeleteAudio: (String) -> Unit,
     onDeleteImage: (String) -> Unit,
+    findQuery: String = "",
+    selectedFindRange: IntRange? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -1468,6 +1572,7 @@ private fun NoteDocumentEditor(
             value = value,
             contentHeightPx = contentSize.height,
             insertSingleRowOnly = blankTapCreatesTailLine,
+            onEditorTap = onEditorTap,
             onValueChange = onValueChange,
             focusRequester = tailFocusRequester,
             keyboardController = keyboardController,
@@ -1490,6 +1595,8 @@ private fun NoteDocumentEditor(
                         value = value,
                         onValueChange = onValueChange,
                         activeInlineFormats = activeInlineFormats,
+                        findQuery = findQuery,
+                        selectedFindRange = selectedFindRange,
                         onFocusChange = onFocusChange,
                         focusRequester = if (index == renderedBlocks.lastIndex) tailFocusRequester else null,
                     )
@@ -1545,6 +1652,8 @@ private fun NoteTextSegmentEditor(
     value: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
     activeInlineFormats: Set<NoteFormat>,
+    findQuery: String,
+    selectedFindRange: IntRange?,
     onFocusChange: (Boolean) -> Unit,
     focusRequester: FocusRequester?,
 ) {
@@ -1560,7 +1669,12 @@ private fun NoteTextSegmentEditor(
                 onValueChange(value.replaceBlock(block.start, block.end, formatted))
             },
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-            visualTransformation = RichNoteVisualTransformation,
+            visualTransformation = RichNoteVisualTransformation(
+                findQuery = findQuery,
+                selectedFindRange = selectedFindRange?.takeIf { it.first >= block.start && it.last < block.end }?.let {
+                    (it.first - block.start)..(it.last - block.start)
+                },
+            ),
             modifier = Modifier
                 .fillMaxWidth()
                 .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
@@ -1910,31 +2024,123 @@ private fun NoteTopBar(
 }
 
 @Composable
-private fun FindInNoteBar(
+private fun FindInNoteToolbar(
     query: String,
+    replaceQuery: String,
+    replaceMode: Boolean,
     matchCount: Int,
+    selectedIndex: Int,
+    onReplaceModeChange: (Boolean) -> Unit,
     onQueryChange: (String) -> Unit,
+    onReplaceQueryChange: (String) -> Unit,
+    onReplaceCurrent: () -> Unit,
+    onReplaceAll: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
     onClose: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var modeMenuOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        tonalElevation = 5.dp,
+        shadowElevation = 4.dp,
     ) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            singleLine = true,
-            label = { Text("Find in note") },
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            if (query.isBlank()) "" else "$matchCount",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        IconButton(onClick = onClose) {
-            Icon(Icons.Default.Close, contentDescription = "Close find in note")
+        Column(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Default.Check, contentDescription = "Done")
+                }
+                Box {
+                    IconButton(onClick = { modeMenuOpen = true }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Search, contentDescription = if (replaceMode) "Find and replace" else "Find")
+                            Icon(
+                                Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                    DropdownMenu(expanded = modeMenuOpen, onDismissRequest = { modeMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Find") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            onClick = {
+                                onReplaceModeChange(false)
+                                modeMenuOpen = false
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Find & Replace") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = {
+                                onReplaceModeChange(true)
+                                modeMenuOpen = false
+                            },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    placeholder = { Text("Find in Note") },
+                    trailingIcon = {
+                        Text(
+                            when {
+                                query.isBlank() -> ""
+                                matchCount == 0 -> "0/0"
+                                else -> "${selectedIndex + 1}/$matchCount"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester),
+                )
+                IconButton(onClick = onPrevious, enabled = matchCount > 0) {
+                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous result")
+                }
+                IconButton(onClick = onNext, enabled = matchCount > 0) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next result")
+                }
+            }
+            if (replaceMode) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    OutlinedTextField(
+                        value = replaceQuery,
+                        onValueChange = onReplaceQueryChange,
+                        singleLine = true,
+                        placeholder = { Text("Replace") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onReplaceCurrent, enabled = matchCount > 0) {
+                        Text("Replace")
+                    }
+                    TextButton(onClick = onReplaceAll, enabled = matchCount > 0) {
+                        Text("All")
+                    }
+                }
+            }
         }
     }
 }
@@ -2629,6 +2835,12 @@ private fun countMatches(text: String, query: String): Int {
     val clean = query.trim()
     if (clean.isEmpty()) return 0
     return Regex(Regex.escape(clean), RegexOption.IGNORE_CASE).findAll(text).count()
+}
+
+private fun findMatchRanges(text: String, query: String): List<IntRange> {
+    val clean = query.trim()
+    if (clean.isEmpty()) return emptyList()
+    return Regex(Regex.escape(clean), RegexOption.IGNORE_CASE).findAll(text).map { it.range }.toList()
 }
 
 private fun shareCurrentNote(
