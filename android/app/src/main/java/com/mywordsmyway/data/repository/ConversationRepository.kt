@@ -3,6 +3,7 @@ package com.mywordsmyway.data.repository
 import android.net.Uri
 import com.mywordsmyway.data.local.ConversationEntity
 import com.mywordsmyway.data.local.ConversationSummaryEntity
+import com.mywordsmyway.data.local.NoteFolderWithCount
 import com.mywordsmyway.data.local.NoteImageEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
 import com.mywordsmyway.data.local.VoiceMemoEntity
@@ -19,8 +20,15 @@ interface ConversationRepository {
     fun observeConversation(conversationId: String): Flow<ConversationEntity?>
     fun observeMemos(conversationId: String): Flow<List<VoiceMemoEntity>>
     fun observeNoteImages(conversationId: String): Flow<List<NoteImageEntity>>
-    fun observeNotes(query: String, startDate: String, endDate: String): Flow<List<ConversationEntity>>
+    fun observeNoteFolders(): Flow<List<NoteFolderWithCount>>
+    fun observeNotes(folderId: String?, query: String, startDate: String, endDate: String): Flow<List<ConversationEntity>>
+    fun observeNotesInFolder(folderId: String?, startDate: String, endDate: String): Flow<List<ConversationEntity>>
     suspend fun startConversation(paymentAcknowledged: Boolean): StartConversationResult
+    suspend fun startConversation(paymentAcknowledged: Boolean, folderId: String?): StartConversationResult
+    suspend fun createNoteFolder(name: String)
+    suspend fun renameNoteFolder(folderId: String, name: String)
+    suspend fun deleteNoteFolder(folderId: String)
+    suspend fun moveNoteToFolder(conversationId: String, folderId: String?)
     suspend fun addMemo(
         conversationId: String,
         audioPath: String?,

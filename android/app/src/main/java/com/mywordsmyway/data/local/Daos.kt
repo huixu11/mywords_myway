@@ -16,6 +16,24 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations WHERE id = :id")
     suspend fun getConversation(id: String): ConversationEntity?
 
+    @Query("SELECT * FROM note_folders WHERE isDefault = 1 LIMIT 1")
+    suspend fun getDefaultNoteFolder(): NoteFolderEntity?
+
+    @Query("SELECT COUNT(*) FROM note_folders")
+    suspend fun countNoteFolders(): Int
+
+    @Query(
+        """
+        SELECT note_folders.*, COUNT(conversations.id) AS noteCount
+        FROM note_folders
+        LEFT JOIN conversations ON conversations.folderId = note_folders.id
+            AND TRIM(conversations.finalNote) != ''
+        GROUP BY note_folders.id
+        ORDER BY note_folders.sortOrder ASC, note_folders.createdAt ASC
+        """,
+    )
+    fun observeNoteFolders(): Flow<List<NoteFolderWithCount>>
+
     @Query("SELECT * FROM conversations WHERE finalNote = '' ORDER BY createdAt DESC LIMIT 1")
     fun observeCurrentConversation(): Flow<ConversationEntity?>
 
@@ -40,8 +58,23 @@ interface ConversationDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertConversation(conversation: ConversationEntity)
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertNoteFolder(folder: NoteFolderEntity)
+
+    @Query("UPDATE note_folders SET name = :name WHERE id = :folderId AND isDefault = 0")
+    suspend fun renameNoteFolder(folderId: String, name: String)
+
+    @Query("DELETE FROM note_folders WHERE id = :folderId AND isDefault = 0")
+    suspend fun deleteNoteFolder(folderId: String)
+
     @Query("UPDATE conversations SET finalNote = :finalNote, title = :title WHERE id = :conversationId")
     suspend fun updateFinalNote(conversationId: String, finalNote: String, title: String)
+
+    @Query("UPDATE conversations SET folderId = :folderId WHERE id = :conversationId")
+    suspend fun updateConversationFolder(conversationId: String, folderId: String?)
+
+    @Query("UPDATE conversations SET folderId = :targetFolderId WHERE folderId = :sourceFolderId")
+    suspend fun moveConversationsToFolder(sourceFolderId: String, targetFolderId: String?)
 
     @Query("UPDATE conversations SET safetyStatus = :safetyStatus WHERE id = :conversationId")
     suspend fun updateSafetyStatus(conversationId: String, safetyStatus: String)
@@ -52,7 +85,8 @@ interface ConversationDao {
         FROM conversations
         LEFT JOIN voice_memos ON voice_memos.conversationId = conversations.id
         LEFT JOIN note_images ON note_images.conversationId = conversations.id
-        WHERE (:query = '' OR finalNote LIKE '%' || :query || '%' OR title LIKE '%' || :query || '%')
+        WHERE (:folderId IS NULL OR conversations.folderId = :folderId)
+          AND (:query = '' OR finalNote LIKE '%' || :query || '%' OR title LIKE '%' || :query || '%')
           AND (:start IS NULL OR conversations.createdAt >= :start)
           AND (:end IS NULL OR conversations.createdAt < :end)
         GROUP BY conversations.id
@@ -63,7 +97,30 @@ interface ConversationDao {
         """,
     )
     fun observeNotes(
+        folderId: String?,
         query: String,
+        start: Instant?,
+        end: Instant?,
+    ): Flow<List<ConversationEntity>>
+
+    @Query(
+        """
+        SELECT conversations.*
+        FROM conversations
+        LEFT JOIN voice_memos ON voice_memos.conversationId = conversations.id
+        LEFT JOIN note_images ON note_images.conversationId = conversations.id
+        WHERE (:folderId IS NULL OR conversations.folderId = :folderId)
+          AND (:start IS NULL OR conversations.createdAt >= :start)
+          AND (:end IS NULL OR conversations.createdAt < :end)
+        GROUP BY conversations.id
+        HAVING TRIM(finalNote) != ''
+          OR COUNT(DISTINCT voice_memos.id) > 0
+          OR COUNT(DISTINCT note_images.id) > 0
+        ORDER BY conversations.createdAt DESC
+        """,
+    )
+    fun observeNotesInFolder(
+        folderId: String?,
         start: Instant?,
         end: Instant?,
     ): Flow<List<ConversationEntity>>

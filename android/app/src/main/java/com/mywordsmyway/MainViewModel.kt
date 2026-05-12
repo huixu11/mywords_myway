@@ -9,6 +9,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.mywordsmyway.data.local.ConversationEntity
 import com.mywordsmyway.data.local.ConversationSummaryEntity
+import com.mywordsmyway.data.local.NoteFolderWithCount
 import com.mywordsmyway.data.local.NoteImageEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
 import com.mywordsmyway.data.local.NounWithLinksEntity
@@ -71,16 +72,38 @@ class MainViewModel(
     fun observeSuggestions(conversationId: String): Flow<List<NounSuggestionEntity>> =
         wordRepository.observeSuggestions(conversationId)
 
-    fun observeNotes(query: String, startDate: String, endDate: String): Flow<List<ConversationEntity>> =
-        conversationRepository.observeNotes(query, startDate, endDate)
+    fun observeNoteFolders(): Flow<List<NoteFolderWithCount>> =
+        conversationRepository.observeNoteFolders()
+
+    fun observeNotes(folderId: String?, query: String, startDate: String, endDate: String): Flow<List<ConversationEntity>> =
+        conversationRepository.observeNotes(folderId, query, startDate, endDate)
+
+    fun observeNotesInFolder(folderId: String?, startDate: String, endDate: String): Flow<List<ConversationEntity>> =
+        conversationRepository.observeNotesInFolder(folderId, startDate, endDate)
 
     suspend fun startConversation(paymentAcknowledged: Boolean): Result<String> = runCatching {
         conversationRepository.startConversation(paymentAcknowledged).conversation.id
     }
 
-    suspend fun startNote(): Result<String> = runCatching {
+    suspend fun startNote(folderId: String? = null): Result<String> = runCatching {
         val needsAcknowledgement = !weeklyAccess.value.freeConversationAvailable
-        conversationRepository.startConversation(paymentAcknowledged = needsAcknowledgement).conversation.id
+        conversationRepository.startConversation(paymentAcknowledged = needsAcknowledgement, folderId = folderId).conversation.id
+    }
+
+    suspend fun createNoteFolder(name: String): Result<Unit> = runCatching {
+        conversationRepository.createNoteFolder(name)
+    }
+
+    suspend fun renameNoteFolder(folderId: String, name: String): Result<Unit> = runCatching {
+        conversationRepository.renameNoteFolder(folderId, name)
+    }
+
+    suspend fun deleteNoteFolder(folderId: String): Result<Unit> = runCatching {
+        conversationRepository.deleteNoteFolder(folderId)
+    }
+
+    suspend fun moveNoteToFolder(conversationId: String, folderId: String?): Result<Unit> = runCatching {
+        conversationRepository.moveNoteToFolder(conversationId, folderId)
     }
 
     fun startRecording(): Boolean {

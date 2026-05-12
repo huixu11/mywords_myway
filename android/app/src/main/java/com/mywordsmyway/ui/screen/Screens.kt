@@ -141,6 +141,7 @@ import com.mywordsmyway.MainViewModel
 import com.mywordsmyway.RecordUiState
 import com.mywordsmyway.data.local.ConversationEntity
 import com.mywordsmyway.data.local.ConversationSummaryEntity
+import com.mywordsmyway.data.local.NoteFolderWithCount
 import com.mywordsmyway.data.local.NoteImageEntity
 import com.mywordsmyway.data.local.NounEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
@@ -158,6 +159,7 @@ import java.io.File
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Base64
+import java.util.Locale
 
 @Composable
 fun AccessScreen(
@@ -979,81 +981,137 @@ fun NotesScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var startDate by rememberSaveable { mutableStateOf("") }
     var endDate by rememberSaveable { mutableStateOf("") }
+    var selectedFolderId by rememberSaveable { mutableStateOf<String?>(null) }
     var showExportDialog by rememberSaveable { mutableStateOf(false) }
+    var showCreateFolderDialog by rememberSaveable { mutableStateOf(false) }
+    var folderName by rememberSaveable { mutableStateOf("") }
     var createError by rememberSaveable { mutableStateOf("") }
-    val notesFlow = remember(query, startDate, endDate) {
-        viewModel.observeNotes(query, startDate, endDate)
+    val folders by viewModel.observeNoteFolders().collectAsState(initial = emptyList())
+    val selectedFolder = folders.firstOrNull { it.folder.id == selectedFolderId }?.folder
+    val searchScopeFolderId = selectedFolderId.takeIf { query.isBlank() || selectedFolder != null }
+    val notesFlow = remember(searchScopeFolderId, startDate, endDate) {
+        viewModel.observeNotesInFolder(searchScopeFolderId, startDate, endDate)
     }
     val notes by notesFlow.collectAsState(initial = emptyList())
+    val searchResults = remember(notes, query) { rankedNoteSearchResults(notes, query) }
+    val topHits = remember(searchResults, query) { if (query.isBlank()) emptyList() else searchResults.take(3) }
+    fun createNoteInCurrentFolder() {
+        scope.launch {
+            viewModel.startNote(selectedFolderId)
+                .onSuccess {
+                    createError = ""
+                    onNewNote(it)
+                }
+                .onFailure { createError = it.message ?: "Could not create note." }
+        }
+    }
 
-    Page(contentPadding = contentPadding) {
-        item {
-            Text("Notes", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = {
-                    scope.launch {
-                        viewModel.startNote()
-                            .onSuccess {
-                                createError = ""
-                                onNewNote(it)
-                            }
-                            .onFailure { createError = it.message ?: "Could not create note." }
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(
+                top = contentPadding.calculateTopPadding() + 24.dp,
+                bottom = contentPadding.calculateBottomPadding() + 112.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                if (selectedFolder != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        IconButton(onClick = { selectedFolderId = null }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to folders")
+                        }
+                        Text(selectedFolder.name, style = MaterialTheme.typography.headlineMedium)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("New note")
+                } else {
+                    Text("Folders", style = MaterialTheme.typography.headlineMedium)
+                }
             }
-            ErrorText(createError)
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true,
-                label = { Text("Search notes") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = startDate,
-                    onValueChange = { startDate = it },
-                    singleLine = true,
-                    label = { Text("Start date") },
-                    placeholder = { Text("YYYY-MM-DD") },
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedTextField(
-                    value = endDate,
-                    onValueChange = { endDate = it },
-                    singleLine = true,
-                    label = { Text("End date") },
-                    placeholder = { Text("YYYY-MM-DD") },
-                    modifier = Modifier.weight(1f),
-                )
+            item {
+                ErrorText(createError)
             }
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(onClick = { showExportDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Share, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Export notes only")
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = startDate,
+                        onValueChange = { startDate = it },
+                        singleLine = true,
+                        label = { Text("Start date") },
+                        placeholder = { Text("YYYY-MM-DD") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = endDate,
+                        onValueChange = { endDate = it },
+                        singleLine = true,
+                        label = { Text("End date") },
+                        placeholder = { Text("YYYY-MM-DD") },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
-            Spacer(Modifier.height(16.dp))
+            if (query.isNotBlank()) {
+                item {
+                    Text("${searchResults.size} ${if (searchResults.size == 1) "note" else "notes"} found", style = MaterialTheme.typography.titleMedium)
+                }
+                if (topHits.isNotEmpty()) {
+                    item { Text("Top Hits", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
+                    items(topHits, key = { "hit-${it.note.id}" }) { result ->
+                        NoteSearchResultRow(result = result, onClick = { onEditNote(result.note.id) })
+                    }
+                }
+                item { Text("Results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
+                items(searchResults, key = { it.note.id }) { result ->
+                    NoteSearchResultRow(result = result, onClick = { onEditNote(result.note.id) })
+                }
+            } else if (selectedFolder == null) {
+                item {
+                    OutlinedButton(onClick = { showCreateFolderDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("New Folder")
+                    }
+                }
+                item {
+                    OutlinedButton(onClick = { showExportDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Share, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Export notes only")
+                    }
+                }
+                items(folders, key = { it.folder.id }) { folder ->
+                    NoteFolderRow(folder = folder, onClick = { selectedFolderId = folder.folder.id })
+                }
+            } else {
+                item {
+                    Text("${notes.size} ${if (notes.size == 1) "note" else "notes"}", style = MaterialTheme.typography.titleMedium)
+                }
+                items(notes, key = { it.id }) { note ->
+                    val noteImages by viewModel.observeNoteImages(note.id).collectAsState(initial = emptyList())
+                    val noteMemos by viewModel.observeMemos(note.id).collectAsState(initial = emptyList())
+                    NoteRow(
+                        note = note,
+                        images = noteImages,
+                        memoCount = noteMemos.size,
+                        onClick = { onEditNote(note.id) },
+                    )
+                }
+            }
         }
-        items(notes, key = { it.id }) { note ->
-            val noteImages by viewModel.observeNoteImages(note.id).collectAsState(initial = emptyList())
-            val noteMemos by viewModel.observeMemos(note.id).collectAsState(initial = emptyList())
-            NoteRow(
-                note = note,
-                images = noteImages,
-                memoCount = noteMemos.size,
-                onClick = { onEditNote(note.id) },
-            )
-        }
+        NotesBottomSearchBar(
+            query = query,
+            onQueryChange = { query = it },
+            onNewNote = ::createNoteInCurrentFolder,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    bottom = contentPadding.calculateBottomPadding() + 12.dp,
+                ),
+        )
     }
 
     if (showExportDialog) {
@@ -1067,6 +1125,135 @@ fun NotesScreen(
                 }
             },
         )
+    }
+    if (showCreateFolderDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateFolderDialog = false },
+            title = { Text("New Folder") },
+            text = {
+                OutlinedTextField(
+                    value = folderName,
+                    onValueChange = { folderName = it },
+                    singleLine = true,
+                    label = { Text("Folder name") },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            viewModel.createNoteFolder(folderName)
+                                .onSuccess {
+                                    folderName = ""
+                                    createError = ""
+                                    showCreateFolderDialog = false
+                                }
+                                .onFailure { createError = it.message ?: "Could not create folder." }
+                        }
+                    },
+                ) { Text("Create") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateFolderDialog = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun NoteFolderRow(
+    folder: NoteFolderWithCount,
+    onClick: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(folder.folder.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${folder.noteCount} ${if (folder.noteCount == 1) "note" else "notes"}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+        }
+    }
+}
+
+@Composable
+private fun NoteSearchResultRow(
+    result: NoteSearchResult,
+    onClick: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    result.note.title.ifBlank { "Untitled note" },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(12.dp))
+                Text("${result.matchCount}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(formatDate(result.note.createdAt), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            if (result.preview.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(result.preview, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotesBottomSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onNewNote: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 5.dp,
+        shadowElevation = 4.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+                placeholder = { Text("Search") },
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onNewNote) {
+                Icon(Icons.Default.Edit, contentDescription = "New note")
+            }
+        }
     }
 }
 
@@ -3231,6 +3418,61 @@ private val timeFormatter = DateTimeFormatter.ofPattern("h:mm a").withZone(ZoneI
 private fun formatDate(instant: java.time.Instant): String = dateFormatter.format(instant)
 
 private fun formatTime(instant: java.time.Instant): String = timeFormatter.format(instant)
+
+private data class NoteSearchResult(
+    val note: ConversationEntity,
+    val matchCount: Int,
+    val preview: String,
+)
+
+private fun rankedNoteSearchResults(notes: List<ConversationEntity>, query: String): List<NoteSearchResult> {
+    val cleanQuery = query.trim()
+    if (cleanQuery.isBlank()) {
+        return notes.map { note ->
+            NoteSearchResult(note = note, matchCount = 0, preview = plainNoteText(note.finalNote))
+        }
+    }
+    val loweredQuery = cleanQuery.lowercase(Locale.getDefault())
+    return notes.mapNotNull { note ->
+        val plainNote = plainNoteText(note.finalNote)
+        val searchable = listOf(note.title, plainNote).joinToString("\n").lowercase(Locale.getDefault())
+        val matchCount = countPlainMatches(searchable, loweredQuery)
+        if (matchCount == 0) {
+            null
+        } else {
+            NoteSearchResult(note = note, matchCount = matchCount, preview = searchPreview(plainNote, cleanQuery))
+        }
+    }.sortedWith(
+        compareByDescending<NoteSearchResult> { it.matchCount }
+            .thenByDescending { it.note.createdAt },
+    )
+}
+
+private fun countPlainMatches(text: String, query: String): Int {
+    if (query.isBlank()) return 0
+    var count = 0
+    var start = 0
+    while (start <= text.length - query.length) {
+        val index = text.indexOf(query, start)
+        if (index < 0) break
+        count++
+        start = index + query.length
+    }
+    return count
+}
+
+private fun searchPreview(plainNote: String, query: String): String {
+    if (plainNote.isBlank()) return ""
+    val index = plainNote.indexOf(query, ignoreCase = true)
+    if (index < 0) return plainNote.lineSequence().firstOrNull().orEmpty().take(160)
+    val start = (index - 48).coerceAtLeast(0)
+    val end = (index + query.length + 96).coerceAtMost(plainNote.length)
+    return buildString {
+        if (start > 0) append("...")
+        append(plainNote.substring(start, end).replace('\n', ' '))
+        if (end < plainNote.length) append("...")
+    }
+}
 
 private fun formatDuration(durationMillis: Long?): String {
     val millis = durationMillis ?: 0L

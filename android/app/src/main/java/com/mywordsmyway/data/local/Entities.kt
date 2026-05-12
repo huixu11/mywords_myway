@@ -8,7 +8,29 @@ import androidx.room.PrimaryKey
 import androidx.room.Relation
 import java.time.Instant
 
-@Entity(tableName = "conversations")
+const val DEFAULT_NOTE_FOLDER_ID = "default_notes"
+
+@Entity(tableName = "note_folders")
+data class NoteFolderEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val createdAt: Instant,
+    val sortOrder: Int,
+    val isDefault: Boolean,
+)
+
+@Entity(
+    tableName = "conversations",
+    foreignKeys = [
+        ForeignKey(
+            entity = NoteFolderEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["folderId"],
+            onDelete = ForeignKey.SET_NULL,
+        ),
+    ],
+    indices = [Index("folderId")],
+)
 data class ConversationEntity(
     @PrimaryKey val id: String,
     val createdAt: Instant,
@@ -17,6 +39,7 @@ data class ConversationEntity(
     val safetyStatus: String,
     val paymentStatus: String,
     val isFreeWeekly: Boolean,
+    val folderId: String?,
 )
 
 @Entity(
@@ -184,4 +207,9 @@ data class NounLinkExportRow(
 data class ConversationSummaryEntity(
     @Embedded val conversation: ConversationEntity,
     val memoCount: Int,
+)
+
+data class NoteFolderWithCount(
+    @Embedded val folder: NoteFolderEntity,
+    val noteCount: Int,
 )

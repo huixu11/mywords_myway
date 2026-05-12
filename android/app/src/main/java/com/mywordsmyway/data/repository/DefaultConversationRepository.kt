@@ -7,7 +7,10 @@ import androidx.room.withTransaction
 import com.mywordsmyway.data.local.AppDatabase
 import com.mywordsmyway.data.local.ConversationEntity
 import com.mywordsmyway.data.local.ConversationSummaryEntity
+import com.mywordsmyway.data.local.DEFAULT_NOTE_FOLDER_ID
 import com.mywordsmyway.data.local.NoteImageEntity
+import com.mywordsmyway.data.local.NoteFolderEntity
+import com.mywordsmyway.data.local.NoteFolderWithCount
 import com.mywordsmyway.data.local.NounSuggestionEntity
 import com.mywordsmyway.data.local.PaymentEntity
 import com.mywordsmyway.data.local.SafetyEventEntity
@@ -25,6 +28,7 @@ import com.mywordsmyway.storage.plainNoteText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Clock
@@ -71,18 +75,80 @@ class DefaultConversationRepository(
     override fun observeNoteImages(conversationId: String): Flow<List<NoteImageEntity>> =
         noteImageDao.observeImagesForConversation(conversationId)
 
+    override fun observeNoteFolders(): Flow<List<NoteFolderWithCount>> =
+        conversationDao.observeNoteFolders().onStart { ensureDefaultFolder() }
+
+    private suspend fun ensureDefaultFolder() {
+        if (conversationDao.countNoteFolders() == 0) {
+            conversationDao.insertNoteFolder(
+                NoteFolderEntity(
+                    id = DEFAULT_NOTE_FOLDER_ID,
+                    name = "Notes",
+                    createdAt = Instant.EPOCH,
+                    sortOrder = 0,
+                    isDefault = true,
+                ),
+            )
+        }
+    }
+
     override fun observeNotes(
+        folderId: String?,
         query: String,
         startDate: String,
         endDate: String,
     ): Flow<List<ConversationEntity>> =
         conversationDao.observeNotes(
+            folderId = folderId,
             query = query.trim(),
             start = parseStartDate(startDate),
             end = parseEndDate(endDate),
         )
 
-    override suspend fun startConversation(paymentAcknowledged: Boolean): StartConversationResult {
+    override fun observeNotesInFolder(folderId: String?, startDate: String, endDate: String): Flow<List<ConversationEntity>> =
+        conversationDao.observeNotesInFolder(
+            folderId = folderId,
+            start = parseStartDate(startDate),
+            end = parseEndDate(endDate),
+        )
+
+    override suspend fun createNoteFolder(name: String) {
+        val cleanName = name.trim()
+        require(cleanName.isNotEmpty()) { "Folder name is required." }
+        val now = clock.instant()
+        ensureDefaultFolder()
+        conversationDao.insertNoteFolder(
+            NoteFolderEntity(
+                id = UUID.randomUUID().toString(),
+                name = cleanName,
+                createdAt = now,
+                sortOrder = conversationDao.countNoteFolders(),
+                isDefault = false,
+            ),
+        )
+    }
+
+    override suspend fun renameNoteFolder(folderId: String, name: String) {
+        val cleanName = name.trim()
+        require(cleanName.isNotEmpty()) { "Folder name is required." }
+        conversationDao.renameNoteFolder(folderId, cleanName)
+    }
+
+    override suspend fun deleteNoteFolder(folderId: String) {
+        database.withTransaction {
+            conversationDao.moveConversationsToFolder(folderId, DEFAULT_NOTE_FOLDER_ID)
+            conversationDao.deleteNoteFolder(folderId)
+        }
+    }
+
+    override suspend fun moveNoteToFolder(conversationId: String, folderId: String?) {
+        conversationDao.updateConversationFolder(conversationId, folderId ?: DEFAULT_NOTE_FOLDER_ID)
+    }
+
+    override suspend fun startConversation(paymentAcknowledged: Boolean): StartConversationResult =
+        startConversation(paymentAcknowledged = paymentAcknowledged, folderId = null)
+
+    override suspend fun startConversation(paymentAcknowledged: Boolean, folderId: String?): StartConversationResult {
         val weekStart = currentWeekStart()
         val freeUsed = conversationDao.countFreeConversationsSince(weekStart) > 0
         if (freeUsed && !paymentAcknowledged) {
@@ -90,6 +156,7 @@ class DefaultConversationRepository(
         }
 
         val now = clock.instant()
+        ensureDefaultFolder()
         val conversation = ConversationEntity(
             id = UUID.randomUUID().toString(),
             createdAt = now,
@@ -98,6 +165,7 @@ class DefaultConversationRepository(
             safetyStatus = "none",
             paymentStatus = if (freeUsed) "paid_acknowledged" else "free_weekly",
             isFreeWeekly = !freeUsed,
+            folderId = folderId ?: DEFAULT_NOTE_FOLDER_ID,
         )
         database.withTransaction {
             conversationDao.insertConversation(conversation)
