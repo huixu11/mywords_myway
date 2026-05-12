@@ -976,21 +976,15 @@ fun NotesScreen(
     onNewNote: (String) -> Unit,
     onEditNote: (String) -> Unit,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var query by rememberSaveable { mutableStateOf("") }
-    var startDate by rememberSaveable { mutableStateOf("") }
-    var endDate by rememberSaveable { mutableStateOf("") }
     var selectedFolderId by rememberSaveable { mutableStateOf<String?>(null) }
-    var showExportDialog by rememberSaveable { mutableStateOf(false) }
-    var showCreateFolderDialog by rememberSaveable { mutableStateOf(false) }
-    var folderName by rememberSaveable { mutableStateOf("") }
     var createError by rememberSaveable { mutableStateOf("") }
     val folders by viewModel.observeNoteFolders().collectAsState(initial = emptyList())
     val selectedFolder = folders.firstOrNull { it.folder.id == selectedFolderId }?.folder
     val searchScopeFolderId = selectedFolderId.takeIf { query.isBlank() || selectedFolder != null }
-    val notesFlow = remember(searchScopeFolderId, startDate, endDate) {
-        viewModel.observeNotesInFolder(searchScopeFolderId, startDate, endDate)
+    val notesFlow = remember(searchScopeFolderId) {
+        viewModel.observeNotesInFolder(searchScopeFolderId, "", "")
     }
     val notes by notesFlow.collectAsState(initial = emptyList())
     val searchResults = remember(notes, query) { rankedNoteSearchResults(notes, query) }
@@ -1032,26 +1026,6 @@ fun NotesScreen(
             item {
                 ErrorText(createError)
             }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = startDate,
-                        onValueChange = { startDate = it },
-                        singleLine = true,
-                        label = { Text("Start date") },
-                        placeholder = { Text("YYYY-MM-DD") },
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedTextField(
-                        value = endDate,
-                        onValueChange = { endDate = it },
-                        singleLine = true,
-                        label = { Text("End date") },
-                        placeholder = { Text("YYYY-MM-DD") },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
             if (query.isNotBlank()) {
                 item {
                     Text("${searchResults.size} ${if (searchResults.size == 1) "note" else "notes"} found", style = MaterialTheme.typography.titleMedium)
@@ -1067,20 +1041,6 @@ fun NotesScreen(
                     NoteSearchResultRow(result = result, onClick = { onEditNote(result.note.id) })
                 }
             } else if (selectedFolder == null) {
-                item {
-                    OutlinedButton(onClick = { showCreateFolderDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("New Folder")
-                    }
-                }
-                item {
-                    OutlinedButton(onClick = { showExportDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.Share, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Export notes only")
-                    }
-                }
                 items(folders, key = { it.folder.id }) { folder ->
                     NoteFolderRow(folder = folder, onClick = { selectedFolderId = folder.folder.id })
                 }
@@ -1114,50 +1074,6 @@ fun NotesScreen(
         )
     }
 
-    if (showExportDialog) {
-        ExportDialog(
-            onDismiss = { showExportDialog = false },
-            onExport = {
-                showExportDialog = false
-                scope.launch {
-                    viewModel.createNotesOnlyExport()
-                        .onSuccess { shareTextFile(context, it) }
-                }
-            },
-        )
-    }
-    if (showCreateFolderDialog) {
-        AlertDialog(
-            onDismissRequest = { showCreateFolderDialog = false },
-            title = { Text("New Folder") },
-            text = {
-                OutlinedTextField(
-                    value = folderName,
-                    onValueChange = { folderName = it },
-                    singleLine = true,
-                    label = { Text("Folder name") },
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            viewModel.createNoteFolder(folderName)
-                                .onSuccess {
-                                    folderName = ""
-                                    createError = ""
-                                    showCreateFolderDialog = false
-                                }
-                                .onFailure { createError = it.message ?: "Could not create folder." }
-                        }
-                    },
-                ) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateFolderDialog = false }) { Text("Cancel") }
-            },
-        )
-    }
 }
 
 @Composable
