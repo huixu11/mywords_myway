@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.mywordsmyway.data.local.BorromeanKnotWithWords
 import com.mywordsmyway.data.local.ConversationEntity
 import com.mywordsmyway.data.local.ConversationSummaryEntity
 import com.mywordsmyway.data.local.NoteFolderWithCount
@@ -49,6 +50,9 @@ class MainViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StorageUsage(0L, 1_073_741_824L))
 
     val nouns: StateFlow<List<NounWithLinksEntity>> = wordRepository.observeNouns()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val borromeanKnots: StateFlow<List<BorromeanKnotWithWords>> = wordRepository.observeBorromeanKnots()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     var recordUiState by mutableStateOf(RecordUiState())
@@ -228,6 +232,34 @@ class MainViewModel(
 
     suspend fun rejectSuggestion(suggestionId: String): Result<Unit> = runCatching {
         wordRepository.rejectSuggestion(suggestionId)
+    }
+
+    suspend fun createBorromeanKnot(title: String, description: String): Result<String> = runCatching {
+        wordRepository.createBorromeanKnot(title, description)
+    }
+
+    suspend fun renameBorromeanKnot(knotId: String, title: String, description: String): Result<Unit> = runCatching {
+        wordRepository.renameBorromeanKnot(knotId, title, description)
+    }
+
+    suspend fun archiveBorromeanKnot(knotId: String): Result<Unit> = runCatching {
+        wordRepository.archiveBorromeanKnot(knotId)
+    }
+
+    suspend fun addBorromeanWord(knotId: String, text: String, registerType: String): Result<String> = runCatching {
+        wordRepository.addBorromeanWord(knotId, text, registerType)
+    }
+
+    suspend fun renameBorromeanWord(wordId: String, text: String): Result<Unit> = runCatching {
+        wordRepository.renameBorromeanWord(wordId, text)
+    }
+
+    suspend fun deleteBorromeanWord(wordId: String): Result<Unit> = runCatching {
+        wordRepository.deleteBorromeanWord(wordId)
+    }
+
+    suspend fun linkBorromeanWordToConversation(wordId: String, conversationId: String): Result<Unit> = runCatching {
+        wordRepository.linkBorromeanWordToConversation(wordId, conversationId)
     }
 
     suspend fun renameNoun(nounId: String, newNoun: String): Result<Unit> = runCatching {

@@ -128,6 +128,46 @@ data class NounLinkEntity(
     val createdAt: Instant,
 )
 
+@Entity(tableName = "borromean_knots")
+data class BorromeanKnotEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val description: String,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+    val sortOrder: Int,
+    val isArchived: Boolean,
+)
+
+@Entity(
+    tableName = "borromean_words",
+    foreignKeys = [
+        ForeignKey(
+            entity = BorromeanKnotEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["knotId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = ConversationEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["conversationId"],
+            onDelete = ForeignKey.SET_NULL,
+        ),
+    ],
+    indices = [Index("knotId"), Index("conversationId"), Index("registerType")],
+)
+data class BorromeanWordEntity(
+    @PrimaryKey val id: String,
+    val knotId: String,
+    val text: String,
+    val registerType: String,
+    val conversationId: String?,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+    val sortOrder: Int,
+)
+
 @Entity(
     tableName = "noun_suggestions",
     foreignKeys = [
@@ -200,6 +240,12 @@ data class NounWithLinksEntity(
     @Embedded val noun: NounEntity,
     @Relation(parentColumn = "id", entityColumn = "nounId")
     val links: List<NounLinkEntity>,
+)
+
+data class BorromeanKnotWithWords(
+    @Embedded val knot: BorromeanKnotEntity,
+    @Relation(parentColumn = "id", entityColumn = "knotId")
+    val words: List<BorromeanWordEntity>,
 )
 
 data class NounLinkExportRow(

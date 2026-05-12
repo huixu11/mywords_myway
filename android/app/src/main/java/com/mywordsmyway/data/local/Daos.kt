@@ -263,6 +263,43 @@ interface NounDao {
 }
 
 @Dao
+interface BorromeanDao {
+    @Transaction
+    @Query("SELECT * FROM borromean_knots WHERE isArchived = 0 ORDER BY sortOrder ASC, updatedAt DESC")
+    fun observeKnotsWithWords(): Flow<List<BorromeanKnotWithWords>>
+
+    @Query("SELECT COUNT(*) FROM borromean_knots")
+    suspend fun countKnots(): Int
+
+    @Query("SELECT COUNT(*) FROM borromean_words WHERE knotId = :knotId AND registerType = :registerType")
+    suspend fun countWords(knotId: String, registerType: String): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertKnot(knot: BorromeanKnotEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertWord(word: BorromeanWordEntity)
+
+    @Query("UPDATE borromean_knots SET title = :title, description = :description, updatedAt = :updatedAt WHERE id = :knotId")
+    suspend fun updateKnot(knotId: String, title: String, description: String, updatedAt: Instant)
+
+    @Query("UPDATE borromean_knots SET isArchived = 1, updatedAt = :updatedAt WHERE id = :knotId")
+    suspend fun archiveKnot(knotId: String, updatedAt: Instant)
+
+    @Query("UPDATE borromean_words SET text = :text, updatedAt = :updatedAt WHERE id = :wordId")
+    suspend fun updateWord(wordId: String, text: String, updatedAt: Instant)
+
+    @Query("UPDATE borromean_words SET conversationId = :conversationId, updatedAt = :updatedAt WHERE id = :wordId")
+    suspend fun linkWordToConversation(wordId: String, conversationId: String, updatedAt: Instant)
+
+    @Query("SELECT * FROM borromean_words WHERE id = :wordId")
+    suspend fun getWord(wordId: String): BorromeanWordEntity?
+
+    @Query("DELETE FROM borromean_words WHERE id = :wordId")
+    suspend fun deleteWord(wordId: String)
+}
+
+@Dao
 interface SafetyEventDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertSafetyEvent(event: SafetyEventEntity)

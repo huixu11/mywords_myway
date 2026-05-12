@@ -17,10 +17,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NounEntity::class,
         NounLinkEntity::class,
         NounSuggestionEntity::class,
+        BorromeanKnotEntity::class,
+        BorromeanWordEntity::class,
         SafetyEventEntity::class,
         PaymentEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 @TypeConverters(InstantConverters::class)
@@ -29,6 +31,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun voiceMemoDao(): VoiceMemoDao
     abstract fun noteImageDao(): NoteImageDao
     abstract fun nounDao(): NounDao
+    abstract fun borromeanDao(): BorromeanDao
     abstract fun safetyEventDao(): SafetyEventDao
     abstract fun paymentDao(): PaymentDao
 
@@ -43,7 +46,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "my_words_my_way.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { instance = it }
             }
@@ -121,6 +124,43 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE conversations ADD COLUMN isLocked INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE conversations ADD COLUMN passwordSalt TEXT")
                 db.execSQL("ALTER TABLE conversations ADD COLUMN passwordHash TEXT")
+            }
+        }
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS borromean_knots (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        description TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        sortOrder INTEGER NOT NULL,
+                        isArchived INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS borromean_words (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        knotId TEXT NOT NULL,
+                        text TEXT NOT NULL,
+                        registerType TEXT NOT NULL,
+                        conversationId TEXT,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        sortOrder INTEGER NOT NULL,
+                        FOREIGN KEY(knotId) REFERENCES borromean_knots(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(conversationId) REFERENCES conversations(id) ON UPDATE NO ACTION ON DELETE SET NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_knotId ON borromean_words(knotId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_conversationId ON borromean_words(conversationId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_registerType ON borromean_words(registerType)")
             }
         }
     }

@@ -15,6 +15,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -22,6 +23,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import kotlinx.coroutines.launch
 import com.mywordsmyway.ui.screen.NotesScreen
 import com.mywordsmyway.ui.screen.PrivacyScreen
 import com.mywordsmyway.ui.screen.ReviewScreen
@@ -47,6 +49,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MyWordsApp(viewModel: MainViewModel) {
     val navController = rememberNavController()
+    val scope = rememberCoroutineScope()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route.orEmpty()
 
@@ -124,7 +127,20 @@ private fun MyWordsApp(viewModel: MainViewModel) {
                 )
             }
             composable("words") {
-                WordsScreen(viewModel = viewModel, contentPadding = padding)
+                WordsScreen(
+                    viewModel = viewModel,
+                    contentPadding = padding,
+                    onOpenNote = { conversationId -> navController.navigate("note/$conversationId") },
+                    onCreateLinkedNote = { _, wordId ->
+                        scope.launch {
+                            viewModel.startNote()
+                                .onSuccess { conversationId ->
+                                    viewModel.linkBorromeanWordToConversation(wordId, conversationId)
+                                    navController.navigate("note/$conversationId")
+                                }
+                        }
+                    },
+                )
             }
             composable("privacy") {
                 PrivacyScreen(viewModel = viewModel, contentPadding = padding)
