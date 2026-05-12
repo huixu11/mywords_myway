@@ -29,6 +29,9 @@ interface ConversationRepository {
     suspend fun renameNoteFolder(folderId: String, name: String)
     suspend fun deleteNoteFolder(folderId: String)
     suspend fun moveNoteToFolder(conversationId: String, folderId: String?)
+    suspend fun lockNote(conversationId: String, password: String)
+    suspend fun removeNoteLock(conversationId: String)
+    suspend fun verifyNotePassword(conversationId: String, password: String): Boolean
     suspend fun addMemo(
         conversationId: String,
         audioPath: String?,

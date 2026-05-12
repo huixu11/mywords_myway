@@ -31,13 +31,18 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.time.Clock
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
+import java.util.Base64
 import java.util.UUID
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 class DefaultConversationRepository(
     private val context: Context,
@@ -145,6 +150,30 @@ class DefaultConversationRepository(
         conversationDao.updateConversationFolder(conversationId, folderId ?: DEFAULT_NOTE_FOLDER_ID)
     }
 
+    override suspend fun lockNote(conversationId: String, password: String) {
+        val cleanPassword = password.trim()
+        require(cleanPassword.isNotEmpty()) { "Password is required." }
+        val saltBytes = ByteArray(PASSWORD_SALT_BYTES).also { SecureRandom().nextBytes(it) }
+        val salt = Base64.getEncoder().encodeToString(saltBytes)
+        val hash = hashPassword(cleanPassword, salt)
+        conversationDao.lockConversation(conversationId, salt, hash)
+    }
+
+    override suspend fun removeNoteLock(conversationId: String) {
+        conversationDao.unlockConversation(conversationId)
+    }
+
+    override suspend fun verifyNotePassword(conversationId: String, password: String): Boolean {
+        val conversation = conversationDao.getConversation(conversationId) ?: return false
+        val salt = conversation.passwordSalt ?: return false
+        val expectedHash = conversation.passwordHash ?: return false
+        val actualHash = hashPassword(password.trim(), salt)
+        return MessageDigest.isEqual(
+            expectedHash.toByteArray(Charsets.UTF_8),
+            actualHash.toByteArray(Charsets.UTF_8),
+        )
+    }
+
     override suspend fun startConversation(paymentAcknowledged: Boolean): StartConversationResult =
         startConversation(paymentAcknowledged = paymentAcknowledged, folderId = null)
 
@@ -166,6 +195,9 @@ class DefaultConversationRepository(
             paymentStatus = if (freeUsed) "paid_acknowledged" else "free_weekly",
             isFreeWeekly = !freeUsed,
             folderId = folderId ?: DEFAULT_NOTE_FOLDER_ID,
+            isLocked = false,
+            passwordSalt = null,
+            passwordHash = null,
         )
         database.withTransaction {
             conversationDao.insertConversation(conversation)
@@ -468,5 +500,23 @@ class DefaultConversationRepository(
         val root = File(context.filesDir, "note_images").canonicalFile
         val target = file.canonicalFile
         return target.path.startsWith(root.path)
+    }
+
+    private fun hashPassword(password: String, salt: String): String {
+        val saltBytes = Base64.getDecoder().decode(salt)
+        val spec = PBEKeySpec(password.toCharArray(), saltBytes, PASSWORD_ITERATIONS, PASSWORD_KEY_BITS)
+        return try {
+            val key = SecretKeyFactory.getInstance(PASSWORD_ALGORITHM).generateSecret(spec).encoded
+            Base64.getEncoder().encodeToString(key)
+        } finally {
+            spec.clearPassword()
+        }
+    }
+
+    private companion object {
+        const val PASSWORD_ALGORITHM = "PBKDF2WithHmacSHA256"
+        const val PASSWORD_ITERATIONS = 120_000
+        const val PASSWORD_KEY_BITS = 256
+        const val PASSWORD_SALT_BYTES = 16
     }
 }

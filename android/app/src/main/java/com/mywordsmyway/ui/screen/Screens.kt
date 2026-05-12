@@ -434,7 +434,8 @@ fun WriteNoteScreen(
     var replaceQuery by rememberSaveable { mutableStateOf("") }
     var selectedFindIndex by rememberSaveable { mutableStateOf(0) }
     var showLockDialog by rememberSaveable { mutableStateOf(false) }
-    var noteLocked by rememberSaveable(conversationId) { mutableStateOf(false) }
+    var showUnlockDialog by rememberSaveable { mutableStateOf(false) }
+    var sessionUnlocked by rememberSaveable(conversationId) { mutableStateOf(false) }
     var hasRecordPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
@@ -472,6 +473,8 @@ fun WriteNoteScreen(
         if (containsSelfHarmThought("$title\n${noteField.text}")) SUPPORT_MESSAGE else recordState.safetyMessage
     }
     val findMatches = remember(noteField.text, findQuery) { findVisibleMatchRanges(noteField.text, findQuery) }
+    val noteLocked = conversation?.isLocked == true
+    val contentHidden = noteLocked && !sessionUnlocked
     LaunchedEffect(findMatches.size) {
         selectedFindIndex = selectedFindIndex.coerceIn(0, (findMatches.size - 1).coerceAtLeast(0))
     }
@@ -520,6 +523,10 @@ fun WriteNoteScreen(
         }
     }
     fun saveNote(navigateAfterSave: Boolean, allowEmptyBack: Boolean = false) {
+        if (contentHidden) {
+            if (navigateAfterSave || allowEmptyBack) onBack()
+            return
+        }
         if (allowEmptyBack && title.isBlank() && noteField.text.isBlank() && memos.isEmpty() && images.isEmpty()) {
             onBack()
             return
@@ -567,6 +574,7 @@ fun WriteNoteScreen(
             item {
                 NoteTopBar(
                     isLocked = noteLocked,
+                    contentVisible = !contentHidden,
                     onBack = { saveNote(navigateAfterSave = true, allowEmptyBack = true) },
                     onShare = { shareCurrentNote(context, title, noteField.text, images.size, memos.size) },
                     onFind = {
@@ -574,8 +582,27 @@ fun WriteNoteScreen(
                         showFindInNote = true
                     },
                     onLock = { showLockDialog = true },
+                    onRemoveLock = {
+                        scope.launch {
+                            viewModel.removeNoteLock(conversationId)
+                                .onSuccess {
+                                    sessionUnlocked = false
+                                    savedNotice = "Lock removed"
+                                }
+                                .onFailure { error = it.message ?: "Could not remove lock." }
+                        }
+                    },
                     onSave = { saveNote(navigateAfterSave = true) },
                 )
+                if (contentHidden) {
+                    LockedNoteContent(
+                        title = conversation?.title.orEmpty(),
+                        createdAt = conversation?.createdAt,
+                        onEnterPassword = { showUnlockDialog = true },
+                    )
+                    ErrorText(error)
+                    return@item
+                }
                 if (savedNotice.isNotBlank()) {
                     Spacer(Modifier.height(6.dp))
                     Text(savedNotice, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
@@ -646,7 +673,7 @@ fun WriteNoteScreen(
             }
         }
 
-        if (showFindInNote) {
+        if (!contentHidden && showFindInNote) {
             FindInNoteToolbar(
                 query = findQuery,
                 replaceQuery = replaceQuery,
@@ -704,7 +731,7 @@ fun WriteNoteScreen(
                         bottom = 8.dp,
                     ),
             )
-        } else if (showWritingToolbar) {
+        } else if (!contentHidden && showWritingToolbar) {
             WritingAccessoryToolbar(
                 isAddingImage = isAddingImage,
                 formatMenuOpen = formatMenuOpen,
@@ -729,7 +756,7 @@ fun WriteNoteScreen(
                         bottom = if (titleFocused || noteFocused) 8.dp else contentPadding.calculateBottomPadding() + 12.dp,
                     ),
             )
-        } else {
+        } else if (!contentHidden) {
             FloatingRecorder(
                 recordState = recordState,
                 memoCount = memos.size,
@@ -753,10 +780,37 @@ fun WriteNoteScreen(
     if (showLockDialog) {
         PasswordLockDialog(
             onDismiss = { showLockDialog = false },
-            onLock = {
-                noteLocked = true
-                savedNotice = "Locked"
-                showLockDialog = false
+            onLock = { password ->
+                scope.launch {
+                    viewModel.lockNote(conversationId, password)
+                        .onSuccess {
+                            sessionUnlocked = true
+                            savedNotice = "Locked"
+                            showLockDialog = false
+                        }
+                        .onFailure { error = it.message ?: "Could not lock note." }
+                }
+            },
+        )
+    }
+
+    if (showUnlockDialog) {
+        PasswordUnlockDialog(
+            onDismiss = { showUnlockDialog = false },
+            onUnlock = { password, onInvalid ->
+                scope.launch {
+                    viewModel.verifyNotePassword(conversationId, password)
+                        .onSuccess { verified ->
+                            if (verified) {
+                                sessionUnlocked = true
+                                showUnlockDialog = false
+                                error = ""
+                            } else {
+                                onInvalid("Incorrect password.")
+                            }
+                        }
+                        .onFailure { onInvalid(it.message ?: "Could not verify password.") }
+                }
             },
         )
     }
@@ -1063,7 +1117,7 @@ fun NotesScreen(
         NotesBottomSearchBar(
             query = query,
             onQueryChange = { query = it },
-            onNewNote = ::createNoteInCurrentFolder,
+            onVoiceNote = ::createNoteInCurrentFolder,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(
@@ -1119,19 +1173,32 @@ private fun NoteSearchResultRow(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    result.note.title.ifBlank { "Untitled note" },
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Row(
                     modifier = Modifier.weight(1f),
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (result.note.isLocked) {
+                        Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                    Text(
+                        result.note.title.ifBlank { "Untitled note" },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 Spacer(Modifier.width(12.dp))
                 Text("${result.matchCount}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(6.dp))
             Text(formatDate(result.note.createdAt), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            if (result.note.isLocked) {
+                Spacer(Modifier.height(8.dp))
+                Text("Locked Note", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (result.preview.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Text(result.preview, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -1144,7 +1211,7 @@ private fun NoteSearchResultRow(
 private fun NotesBottomSearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
-    onNewNote: () -> Unit,
+    onVoiceNote: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -1166,8 +1233,8 @@ private fun NotesBottomSearchBar(
                 placeholder = { Text("Search") },
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = onNewNote) {
-                Icon(Icons.Default.Edit, contentDescription = "New note")
+            IconButton(onClick = onVoiceNote) {
+                Icon(Icons.Default.Mic, contentDescription = "New voice note")
             }
         }
     }
@@ -2073,10 +2140,12 @@ private fun tableToken(cells: List<List<String>>): String {
 @Composable
 private fun NoteTopBar(
     isLocked: Boolean,
+    contentVisible: Boolean,
     onBack: () -> Unit,
     onShare: () -> Unit,
     onFind: () -> Unit,
     onLock: () -> Unit,
+    onRemoveLock: () -> Unit,
     onSave: () -> Unit,
 ) {
     var moreOpen by remember { mutableStateOf(false) }
@@ -2096,34 +2165,65 @@ private fun NoteTopBar(
             )
         }
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = onShare) {
-            Icon(Icons.Default.Share, contentDescription = "Share note")
-        }
-        Box {
-            IconButton(onClick = { moreOpen = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More tools")
+        if (contentVisible) {
+            IconButton(onClick = onShare) {
+                Icon(Icons.Default.Share, contentDescription = "Share note")
             }
-            DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Find in Note") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    onClick = {
-                        moreOpen = false
-                        onFind()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Lock with password") },
-                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-                    onClick = {
-                        moreOpen = false
-                        onLock()
-                    },
-                )
+            Box {
+                IconButton(onClick = { moreOpen = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "More tools")
+                }
+                DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Find in Note") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        onClick = {
+                            moreOpen = false
+                            onFind()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (isLocked) "Remove Lock" else "Lock with password") },
+                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                        onClick = {
+                            moreOpen = false
+                            if (isLocked) {
+                                onRemoveLock()
+                            } else {
+                                onLock()
+                            }
+                        },
+                    )
+                }
+            }
+            TextButton(onClick = onSave) {
+                Text("Save")
             }
         }
-        TextButton(onClick = onSave) {
-            Text("Save")
+    }
+}
+
+@Composable
+private fun LockedNoteContent(
+    title: String,
+    createdAt: java.time.Instant?,
+    onEnterPassword: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 44.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(44.dp))
+        Text(title.ifBlank { "Locked Note" }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        createdAt?.let {
+            Text(formatDate(it), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("This note is locked.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(onClick = onEnterPassword) {
+            Text("Enter Password")
         }
     }
 }
@@ -2499,7 +2599,7 @@ private fun InlineNoteAttachments(
 @Composable
 private fun PasswordLockDialog(
     onDismiss: () -> Unit,
-    onLock: () -> Unit,
+    onLock: (String) -> Unit,
 ) {
     var password by rememberSaveable { mutableStateOf("") }
     var confirm by rememberSaveable { mutableStateOf("") }
@@ -2542,10 +2642,58 @@ private fun PasswordLockDialog(
                         password != confirm -> "Passwords do not match."
                         else -> ""
                     }
-                    if (error.isBlank()) onLock()
+                    if (error.isBlank()) onLock(password)
                 },
             ) {
                 Text("Lock")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun PasswordUnlockDialog(
+    onDismiss: () -> Unit,
+    onUnlock: (String, (String) -> Unit) -> Unit,
+) {
+    var password by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Enter Password") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = {
+                        password = it
+                        error = ""
+                    },
+                    singleLine = true,
+                    label = { Text("Password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                if (error.isNotBlank()) {
+                    Text(error, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (password.isBlank()) {
+                        error = "Password is required."
+                    } else {
+                        onUnlock(password) { message -> error = message }
+                    }
+                },
+            ) {
+                Text("Unlock")
             }
         },
         dismissButton = {
@@ -2805,7 +2953,8 @@ private fun ConversationHistoryRow(
     summary: ConversationSummaryEntity,
     onClick: () -> Unit,
 ) {
-    val note = plainNoteText(summary.conversation.finalNote)
+    val isLocked = summary.conversation.isLocked
+    val note = if (isLocked) "" else plainNoteText(summary.conversation.finalNote)
     Surface(
         shape = RoundedCornerShape(8.dp),
         tonalElevation = 1.dp,
@@ -2815,14 +2964,23 @@ private fun ConversationHistoryRow(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    summary.conversation.title.ifBlank { "Untitled note" },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Row(
                     modifier = Modifier.weight(1f),
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (isLocked) {
+                        Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                    Text(
+                        summary.conversation.title.ifBlank { "Untitled note" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 Spacer(Modifier.width(12.dp))
                 Text(
                     "${summary.memoCount}",
@@ -2836,7 +2994,10 @@ private fun ConversationHistoryRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (note.isNotBlank()) {
+            if (isLocked) {
+                Spacer(Modifier.height(8.dp))
+                Text("Locked Note", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (note.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Text(note, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
@@ -3214,15 +3375,24 @@ private fun NoteRow(
         Column(modifier = Modifier.padding(16.dp)) {
             Text(formatDate(note.createdAt), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(6.dp))
-            Text(
-                note.title.ifBlank { "Untitled note" },
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            val displayNote = plainNoteText(note.finalNote)
-            if (displayNote.isNotBlank()) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (note.isLocked) {
+                    Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+                Text(
+                    note.title.ifBlank { "Untitled note" },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            val displayNote = if (note.isLocked) "" else plainNoteText(note.finalNote)
+            if (note.isLocked) {
+                Spacer(Modifier.height(8.dp))
+                Text("Locked Note", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (displayNote.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Text(displayNote, maxLines = 5, overflow = TextOverflow.Ellipsis)
             }
@@ -3345,13 +3515,17 @@ private fun rankedNoteSearchResults(notes: List<ConversationEntity>, query: Stri
     val cleanQuery = query.trim()
     if (cleanQuery.isBlank()) {
         return notes.map { note ->
-            NoteSearchResult(note = note, matchCount = 0, preview = plainNoteText(note.finalNote))
+            NoteSearchResult(note = note, matchCount = 0, preview = if (note.isLocked) "" else plainNoteText(note.finalNote))
         }
     }
     val loweredQuery = cleanQuery.lowercase(Locale.getDefault())
     return notes.mapNotNull { note ->
-        val plainNote = plainNoteText(note.finalNote)
-        val searchable = listOf(note.title, plainNote).joinToString("\n").lowercase(Locale.getDefault())
+        val plainNote = if (note.isLocked) "" else plainNoteText(note.finalNote)
+        val searchable = if (note.isLocked) {
+            note.title.lowercase(Locale.getDefault())
+        } else {
+            listOf(note.title, plainNote).joinToString("\n").lowercase(Locale.getDefault())
+        }
         val matchCount = countPlainMatches(searchable, loweredQuery)
         if (matchCount == 0) {
             null

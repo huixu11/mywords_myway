@@ -106,6 +106,18 @@ class MainViewModel(
         conversationRepository.moveNoteToFolder(conversationId, folderId)
     }
 
+    suspend fun lockNote(conversationId: String, password: String): Result<Unit> = runCatching {
+        conversationRepository.lockNote(conversationId, password)
+    }
+
+    suspend fun removeNoteLock(conversationId: String): Result<Unit> = runCatching {
+        conversationRepository.removeNoteLock(conversationId)
+    }
+
+    suspend fun verifyNotePassword(conversationId: String, password: String): Result<Boolean> = runCatching {
+        conversationRepository.verifyNotePassword(conversationId, password)
+    }
+
     fun startRecording(): Boolean {
         return runCatching {
             audioRecorder.start()

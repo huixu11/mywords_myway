@@ -40,6 +40,9 @@ data class ConversationEntity(
     val paymentStatus: String,
     val isFreeWeekly: Boolean,
     val folderId: String?,
+    val isLocked: Boolean,
+    val passwordSalt: String?,
+    val passwordHash: String?,
 )
 
 @Entity(

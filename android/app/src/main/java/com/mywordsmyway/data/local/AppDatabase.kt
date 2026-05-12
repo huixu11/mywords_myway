@@ -20,7 +20,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SafetyEventEntity::class,
         PaymentEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(InstantConverters::class)
@@ -43,7 +43,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "my_words_my_way.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }
@@ -113,6 +113,14 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("DROP TABLE conversations")
                 db.execSQL("ALTER TABLE conversations_new RENAME TO conversations")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_conversations_folderId ON conversations(folderId)")
+            }
+        }
+
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN isLocked INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN passwordSalt TEXT")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN passwordHash TEXT")
             }
         }
     }
