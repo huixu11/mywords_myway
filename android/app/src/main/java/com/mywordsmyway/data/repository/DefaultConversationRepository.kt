@@ -21,6 +21,7 @@ import com.mywordsmyway.data.model.SafetyResult
 import com.mywordsmyway.data.model.StartConversationResult
 import com.mywordsmyway.data.model.WeeklyAccess
 import com.mywordsmyway.model.ModelService
+import com.mywordsmyway.storage.plainNoteText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -230,7 +231,8 @@ class DefaultConversationRepository(
         finalNote: String,
     ) {
         val cleanNote = finalNote.trim()
-        val cleanTitle = normalizedTitle(title, cleanNote)
+        val visibleNote = plainNoteText(cleanNote)
+        val cleanTitle = normalizedTitle(title, visibleNote)
         val imageCount = noteImageDao.countForConversation(conversationId)
         val memoCount = memoDao.countForConversation(conversationId)
         require(cleanTitle.isNotEmpty() || cleanNote.isNotEmpty() || imageCount > 0 || memoCount > 0) {
@@ -242,7 +244,7 @@ class DefaultConversationRepository(
                 finalNote = cleanNote,
                 title = cleanTitle.ifBlank { "Untitled note" },
             )
-            nounDao.updateVisibleNoteExcerpt(conversationId, cleanNote)
+            nounDao.updateVisibleNoteExcerpt(conversationId, visibleNote)
         }
     }
 
@@ -252,14 +254,15 @@ class DefaultConversationRepository(
         finalNote: String,
     ): List<NounSuggestionEntity> {
         val cleanNote = finalNote.trim()
-        val cleanTitle = normalizedTitle(title, cleanNote)
+        val visibleNote = plainNoteText(cleanNote)
+        val cleanTitle = normalizedTitle(title, visibleNote)
         val imageCount = noteImageDao.countForConversation(conversationId)
         val memoCount = memoDao.countForConversation(conversationId)
         require(cleanTitle.isNotEmpty() || cleanNote.isNotEmpty() || imageCount > 0 || memoCount > 0) {
             "Write a note, record audio, or add an image before saving."
         }
         val existingNouns = nounDao.getConfirmedNounNames()
-        val extractionSource = listOf(cleanTitle, cleanNote).filter { it.isNotBlank() }.joinToString("\n")
+        val extractionSource = listOf(cleanTitle, visibleNote).filter { it.isNotBlank() }.joinToString("\n")
         val result = if (extractionSource.isBlank()) {
             NounExtractionResult(emptyList())
         } else {

@@ -34,7 +34,7 @@ class NotesExporter(
                 if (note.title.isNotBlank()) {
                     appendLine(note.title)
                 }
-                appendLine(note.finalNote)
+                appendLine(plainNoteText(note.finalNote))
                 val nouns = linksByConversation[note.id].orEmpty()
                 if (nouns.isNotEmpty()) {
                     appendLine("Words: ${nouns.joinToString(", ")}")

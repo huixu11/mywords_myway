@@ -149,6 +149,7 @@ import com.mywordsmyway.data.local.VoiceMemoEntity
 import com.mywordsmyway.data.model.LISTENING_QUESTION
 import com.mywordsmyway.data.model.NoteFileAttachment
 import com.mywordsmyway.data.model.SUPPORT_MESSAGE
+import com.mywordsmyway.storage.plainNoteText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -2701,7 +2702,7 @@ private fun ConversationHistoryRow(
     summary: ConversationSummaryEntity,
     onClick: () -> Unit,
 ) {
-    val note = summary.conversation.finalNote.trim()
+    val note = plainNoteText(summary.conversation.finalNote)
     Surface(
         shape = RoundedCornerShape(8.dp),
         tonalElevation = 1.dp,
@@ -3117,9 +3118,10 @@ private fun NoteRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (note.finalNote.isNotBlank()) {
+            val displayNote = plainNoteText(note.finalNote)
+            if (displayNote.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
-                Text(note.finalNote, maxLines = 5, overflow = TextOverflow.Ellipsis)
+                Text(displayNote, maxLines = 5, overflow = TextOverflow.Ellipsis)
             }
             if (images.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))

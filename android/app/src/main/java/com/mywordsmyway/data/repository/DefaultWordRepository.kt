@@ -6,6 +6,7 @@ import com.mywordsmyway.data.local.NounEntity
 import com.mywordsmyway.data.local.NounLinkEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
 import com.mywordsmyway.data.local.NounWithLinksEntity
+import com.mywordsmyway.storage.plainNoteText
 import kotlinx.coroutines.flow.Flow
 import java.time.Clock
 import java.util.UUID
@@ -40,7 +41,7 @@ class DefaultWordRepository(
                 createdAt = now,
                 updatedAt = now,
             ).also { nounDao.insertNoun(it) }
-            val note = conversationDao.getConversation(suggestion.conversationId)?.finalNote.orEmpty()
+            val note = plainNoteText(conversationDao.getConversation(suggestion.conversationId)?.finalNote.orEmpty())
             nounDao.insertLink(
                 NounLinkEntity(
                     id = UUID.randomUUID().toString(),
