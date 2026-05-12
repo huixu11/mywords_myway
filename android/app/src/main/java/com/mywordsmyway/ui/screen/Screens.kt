@@ -19,11 +19,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -94,7 +96,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
@@ -102,13 +108,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -458,13 +465,6 @@ fun WriteNoteScreen(
     }
     val writingMenuOpen = formatMenuOpen || attachmentMenuOpen
     val showWritingToolbar = (imeBottom > 0 && (titleFocused || noteFocused)) || writingMenuOpen
-    LaunchedEffect(noteField.text.length, noteField.selection.end, noteFocused, imeBottom) {
-        val cursorAtEnd = noteField.selection.collapsed &&
-            noteField.selection.end >= (noteField.text.length - 1).coerceAtLeast(0)
-        if (noteFocused && imeBottom > 0 && cursorAtEnd) {
-            noteListState.animateScrollToItem(index = 0, scrollOffset = 100_000)
-        }
-    }
     LaunchedEffect(conversation?.id) {
         val loaded = conversation ?: return@LaunchedEffect
         if (loadedConversationId == loaded.id) return@LaunchedEffect
@@ -527,7 +527,10 @@ fun WriteNoteScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val bottomSafePadding = contentPadding.calculateBottomPadding()
+        val floatingControlsPadding = if (imeBottom > 0) imeBottomPadding + 72.dp else bottomSafePadding + 96.dp
+        val visibleNoteEditorMinHeight = (maxHeight - 180.dp + floatingControlsPadding).coerceAtLeast(360.dp)
         LazyColumn(
             state = noteListState,
             modifier = Modifier
@@ -535,7 +538,7 @@ fun WriteNoteScreen(
                 .padding(horizontal = 20.dp),
             contentPadding = PaddingValues(
                 top = contentPadding.calculateTopPadding() + 24.dp,
-                bottom = contentPadding.calculateBottomPadding() + 220.dp + if (imeBottom > 0) imeBottomPadding else 0.dp,
+                bottom = floatingControlsPadding,
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -613,7 +616,7 @@ fun WriteNoteScreen(
                     onDeleteImage = { imageId -> scope.launch { viewModel.deleteNoteImage(imageId) } },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 360.dp),
+                        .heightIn(min = visibleNoteEditorMinHeight),
                 )
                 ErrorText(error)
             }
@@ -1402,6 +1405,40 @@ private fun appendTextBlocks(text: String, start: Int, end: Int, blocks: Mutable
     blocks += NoteBlock.TextSegment(start, end, text.substring(start, end))
 }
 
+private val noteEditorMinHeight = 360.dp
+private val noteEditorLineHeight = 24.sp
+
+private fun Modifier.noteBlankTapTarget(
+    value: TextFieldValue,
+    contentHeightPx: Int,
+    insertSingleRowOnly: Boolean,
+    onValueChange: (TextFieldValue) -> Unit,
+    focusRequester: FocusRequester,
+    keyboardController: SoftwareKeyboardController?,
+): Modifier {
+    return fillMaxWidth()
+        .heightIn(min = noteEditorMinHeight)
+        .pointerInput(value.text, contentHeightPx, focusRequester) {
+            detectTapGestures { offset ->
+                if (offset.y <= contentHeightPx) return@detectTapGestures
+                val lineHeightPx = noteEditorLineHeight.toPx().coerceAtLeast(1f)
+                val missingRows = if (insertSingleRowOnly) {
+                    1
+                } else {
+                    (((offset.y - contentHeightPx) / lineHeightPx).toInt() + 1).coerceIn(1, 12)
+                }
+                val insertAt = value.text.length
+                val insertedRows = "\n".repeat(missingRows)
+                val nextText = value.text.replaceRange(insertAt, insertAt, insertedRows)
+                val cursor = insertAt + insertedRows.length
+                onValueChange(value.copy(text = nextText, selection = TextRange(cursor)))
+                focusRequester.requestFocus()
+                keyboardController?.show()
+            }
+        }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun NoteDocumentEditor(
     value: TextFieldValue,
@@ -1415,61 +1452,89 @@ private fun NoteDocumentEditor(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val blocks = remember(value.text) { parseNoteBlocks(value.text) }
     val memoById = remember(memos) { memos.associateBy { it.id } }
     val imageById = remember(images) { images.associateBy { it.id } }
+    val tailFocusRequester = remember { FocusRequester() }
+    var contentSize by remember { mutableStateOf(IntSize.Zero) }
     val hasEditableTail = value.text.isEmpty() ||
         value.text.endsWith('\n') ||
         blocks.lastOrNull() is NoteBlock.TextSegment
+    val blankTapCreatesTailLine = value.text.isNotEmpty() && blocks.lastOrNull() !is NoteBlock.TextSegment
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (value.text.isBlank()) {
-            Text("Start writing", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
-        }
-        blocks.ifEmpty { listOf(NoteBlock.TextSegment(0, 0, "")) }.forEach { block ->
-            when (block) {
-                is NoteBlock.TextSegment -> NoteTextSegmentEditor(block, value, onValueChange, activeInlineFormats, onFocusChange)
-                is NoteBlock.Checklist -> ChecklistBlockEditor(block, value, onValueChange, onFocusChange)
-                is NoteBlock.Table -> EditableTableBlock(block, value, onValueChange)
-                is NoteBlock.Attachment -> when (block.type) {
-                    "audio" -> memoById[block.id]?.let { memo ->
-                        MemoRow(
-                            index = memos.indexOfFirst { it.id == memo.id }.takeIf { it >= 0 }?.plus(1) ?: 1,
-                            memo = memo,
-                            onDeleteAudio = { onDeleteAudio(memo.id) },
-                        )
-                    }
-                    "image", "drawing" -> imageById[block.id]?.let { image ->
-                        NoteImageRow(image = image, onDelete = { onDeleteImage(image.id) })
-                    }
-                    "file" -> {
-                        val attachment = parseFileAttachmentToken(block.id)
-                        FileAttachmentRow(
-                            attachment = attachment,
-                            onOpen = { openFileAttachment(context, attachment) },
-                            onDelete = {
-                                deleteFileAttachment(attachment)
-                                onValueChange(value.replaceTextRange(block.start, block.end, "", block.start))
-                            },
-                        )
+    Box(
+        modifier = modifier.noteBlankTapTarget(
+            value = value,
+            contentHeightPx = contentSize.height,
+            insertSingleRowOnly = blankTapCreatesTailLine,
+            onValueChange = onValueChange,
+            focusRequester = tailFocusRequester,
+            keyboardController = keyboardController,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .onSizeChanged { contentSize = it },
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (value.text.isBlank()) {
+                Text("Start writing", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
+            }
+            val renderedBlocks = blocks.ifEmpty { listOf(NoteBlock.TextSegment(0, 0, "")) }
+            renderedBlocks.forEachIndexed { index, block ->
+                when (block) {
+                    is NoteBlock.TextSegment -> NoteTextSegmentEditor(
+                        block = block,
+                        value = value,
+                        onValueChange = onValueChange,
+                        activeInlineFormats = activeInlineFormats,
+                        onFocusChange = onFocusChange,
+                        focusRequester = if (index == renderedBlocks.lastIndex) tailFocusRequester else null,
+                    )
+                    is NoteBlock.Checklist -> ChecklistBlockEditor(block, value, onValueChange, onFocusChange)
+                    is NoteBlock.Table -> EditableTableBlock(block, value, onValueChange, onFocusChange)
+                    is NoteBlock.Attachment -> when (block.type) {
+                        "audio" -> memoById[block.id]?.let { memo ->
+                            MemoRow(
+                                index = memos.indexOfFirst { it.id == memo.id }.takeIf { it >= 0 }?.plus(1) ?: 1,
+                                memo = memo,
+                                onDeleteAudio = { onDeleteAudio(memo.id) },
+                            )
+                        }
+                        "image", "drawing" -> imageById[block.id]?.let { image ->
+                            NoteImageRow(image = image, onDelete = { onDeleteImage(image.id) })
+                        }
+                        "file" -> {
+                            val attachment = parseFileAttachmentToken(block.id)
+                            FileAttachmentRow(
+                                attachment = attachment,
+                                onOpen = { openFileAttachment(context, attachment) },
+                                onDelete = {
+                                    deleteFileAttachment(attachment)
+                                    onValueChange(value.replaceTextRange(block.start, block.end, "", block.start))
+                                },
+                            )
+                        }
                     }
                 }
             }
-        }
-        if (!hasEditableTail) {
-            BasicTextField(
-                value = TextFieldValue(""),
-                onValueChange = {
-                    if (it.text.isNotEmpty()) {
-                        onValueChange(value.copy(text = value.text + "\n" + it.text, selection = TextRange(value.text.length + 1 + it.text.length)))
-                    }
-                },
-                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(32.dp)
-                    .onFocusChanged { onFocusChange(it.isFocused) },
-            )
+            if (!hasEditableTail) {
+                BasicTextField(
+                    value = TextFieldValue(""),
+                    onValueChange = {
+                        if (it.text.isNotEmpty()) {
+                            onValueChange(value.copy(text = value.text + "\n" + it.text, selection = TextRange(value.text.length + 1 + it.text.length)))
+                        }
+                    },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(tailFocusRequester)
+                        .onFocusChanged { onFocusChange(it.isFocused) },
+                )
+            }
         }
     }
 }
@@ -1481,21 +1546,27 @@ private fun NoteTextSegmentEditor(
     onValueChange: (TextFieldValue) -> Unit,
     activeInlineFormats: Set<NoteFormat>,
     onFocusChange: (Boolean) -> Unit,
+    focusRequester: FocusRequester?,
 ) {
-    BasicTextField(
-        value = TextFieldValue(block.text, selection = localSelectionFor(value.selection, block.start, block.end)),
-        onValueChange = {
-            val formatted = applyActiveInlineFormats(
-                oldValue = TextFieldValue(block.text, selection = localSelectionFor(value.selection, block.start, block.end)),
-                newValue = it,
-                activeInlineFormats = activeInlineFormats,
-            )
-            onValueChange(value.replaceBlock(block.start, block.end, formatted))
-        },
-        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-        visualTransformation = RichNoteVisualTransformation,
-        modifier = Modifier.fillMaxWidth().onFocusChanged { onFocusChange(it.isFocused) },
-    )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        BasicTextField(
+            value = TextFieldValue(block.text, selection = localSelectionFor(value.selection, block.start, block.end)),
+            onValueChange = {
+                val formatted = applyActiveInlineFormats(
+                    oldValue = TextFieldValue(block.text, selection = localSelectionFor(value.selection, block.start, block.end)),
+                    newValue = it,
+                    activeInlineFormats = activeInlineFormats,
+                )
+                onValueChange(value.replaceBlock(block.start, block.end, formatted))
+            },
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+            visualTransformation = RichNoteVisualTransformation,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                .onFocusChanged { onFocusChange(it.isFocused) },
+        )
+    }
 }
 
 @Composable
@@ -1538,6 +1609,7 @@ private fun EditableTableBlock(
     block: NoteBlock.Table,
     value: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
+    onFocusChange: (Boolean) -> Unit,
 ) {
     val cells = remember(block.payload) { parseTablePayload(block.payload) }
     fun update(row: Int, column: Int, cellValue: String) {
@@ -1564,7 +1636,7 @@ private fun EditableTableBlock(
                             } else {
                                 MaterialTheme.typography.bodyMedium
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).onFocusChanged { onFocusChange(it.isFocused) },
                         )
                     }
                 }
