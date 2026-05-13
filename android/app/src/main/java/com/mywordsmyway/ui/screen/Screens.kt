@@ -1417,6 +1417,8 @@ private fun BorromeanObjectAHero(
                 onKnotTransform = onKnotTransform,
                 modifier = Modifier.fillMaxWidth().height(300.dp),
             )
+            Spacer(Modifier.height(12.dp))
+            ObjectACentralHoleStatement()
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 LacanRegisterChip(
@@ -1492,6 +1494,30 @@ private fun BorromeanObjectAHero(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ObjectACentralHoleStatement() {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White.copy(alpha = 0.10f),
+        contentColor = Color.White,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("object a is the central hole", fontWeight = FontWeight.SemiBold)
+            Text(
+                "The knot is organized around this hole. You can fill it with imaginary words, but it will never be that object, because object a is the missing place itself.",
+                color = Color.White.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "The center words are triggers or fragments of object a: gaze, voice, breast, excrement, and other words you place into the hole.",
+                color = Color.White.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
@@ -1619,7 +1645,7 @@ private fun BorromeanKnotCanvas(
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("object a", color = Color.White.copy(alpha = 0.70f), style = MaterialTheme.typography.labelMedium)
-            Text("remainder / cause", color = Color.White.copy(alpha = 0.58f), style = MaterialTheme.typography.labelSmall)
+            Text("central hole", color = Color.White.copy(alpha = 0.58f), style = MaterialTheme.typography.labelSmall)
             words.take(4).forEach { word ->
                 Surface(
                     shape = RoundedCornerShape(50),
