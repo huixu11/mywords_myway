@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SafetyEventEntity::class,
         PaymentEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 @TypeConverters(InstantConverters::class)
@@ -46,7 +46,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "my_words_my_way.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                     .also { instance = it }
             }
@@ -161,6 +161,17 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_knotId ON borromean_words(knotId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_conversationId ON borromean_words(conversationId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_registerType ON borromean_words(registerType)")
+            }
+        }
+
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE borromean_knots ADD COLUMN personName TEXT")
+                db.execSQL("ALTER TABLE borromean_knots ADD COLUMN theoryNote TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE borromean_words ADD COLUMN objectPartType TEXT")
+                db.execSQL("ALTER TABLE borromean_words ADD COLUMN emotionalWeight INTEGER NOT NULL DEFAULT 50")
+                db.execSQL("ALTER TABLE borromean_words ADD COLUMN importanceWeight INTEGER NOT NULL DEFAULT 50")
+                db.execSQL("ALTER TABLE borromean_words ADD COLUMN desireWeight INTEGER NOT NULL DEFAULT 50")
             }
         }
     }

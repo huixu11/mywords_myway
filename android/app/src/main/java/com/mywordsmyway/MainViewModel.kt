@@ -234,24 +234,47 @@ class MainViewModel(
         wordRepository.rejectSuggestion(suggestionId)
     }
 
-    suspend fun createBorromeanKnot(title: String, description: String): Result<String> = runCatching {
-        wordRepository.createBorromeanKnot(title, description)
+    suspend fun createBorromeanKnot(title: String, description: String, personName: String? = null, theoryNote: String = ""): Result<String> = runCatching {
+        wordRepository.createBorromeanKnot(title, description, personName, theoryNote)
     }
 
-    suspend fun renameBorromeanKnot(knotId: String, title: String, description: String): Result<Unit> = runCatching {
-        wordRepository.renameBorromeanKnot(knotId, title, description)
+    suspend fun renameBorromeanKnot(knotId: String, title: String, description: String, personName: String? = null, theoryNote: String = ""): Result<Unit> = runCatching {
+        wordRepository.renameBorromeanKnot(knotId, title, description, personName, theoryNote)
     }
 
     suspend fun archiveBorromeanKnot(knotId: String): Result<Unit> = runCatching {
         wordRepository.archiveBorromeanKnot(knotId)
     }
 
-    suspend fun addBorromeanWord(knotId: String, text: String, registerType: String): Result<String> = runCatching {
-        wordRepository.addBorromeanWord(knotId, text, registerType)
+    suspend fun addBorromeanWord(
+        knotId: String,
+        text: String,
+        registerType: String,
+        objectPartType: String? = null,
+        emotionalWeight: Int = 50,
+        importanceWeight: Int = 50,
+        desireWeight: Int = 50,
+    ): Result<String> = runCatching {
+        wordRepository.addBorromeanWord(knotId, text, registerType, objectPartType, emotionalWeight, importanceWeight, desireWeight)
     }
 
     suspend fun renameBorromeanWord(wordId: String, text: String): Result<Unit> = runCatching {
         wordRepository.renameBorromeanWord(wordId, text)
+    }
+
+    suspend fun updateBorromeanWordDetails(
+        wordId: String,
+        text: String,
+        objectPartType: String?,
+        emotionalWeight: Int,
+        importanceWeight: Int,
+        desireWeight: Int,
+    ): Result<Unit> = runCatching {
+        wordRepository.updateBorromeanWordDetails(wordId, text, objectPartType, emotionalWeight, importanceWeight, desireWeight)
+    }
+
+    suspend fun updateBorromeanWordWeights(wordId: String, emotionalWeight: Int, importanceWeight: Int, desireWeight: Int): Result<Unit> = runCatching {
+        wordRepository.updateBorromeanWordWeights(wordId, emotionalWeight, importanceWeight, desireWeight)
     }
 
     suspend fun deleteBorromeanWord(wordId: String): Result<Unit> = runCatching {

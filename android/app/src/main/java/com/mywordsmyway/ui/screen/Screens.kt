@@ -23,6 +23,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
@@ -78,12 +79,14 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -1029,6 +1032,16 @@ fun WordsScreen(
     var editingWord by remember { mutableStateOf<BorromeanWordEntity?>(null) }
     var addingRegister by rememberSaveable { mutableStateOf<String?>(null) }
     var wordText by rememberSaveable { mutableStateOf("") }
+    var objectPartType by rememberSaveable { mutableStateOf("") }
+    var emotionalWeight by rememberSaveable { mutableStateOf(50) }
+    var importanceWeight by rememberSaveable { mutableStateOf(50) }
+    var desireWeight by rememberSaveable { mutableStateOf(50) }
+    var knotRotation by rememberSaveable { mutableStateOf(0f) }
+    var knotStretch by rememberSaveable { mutableStateOf(1f) }
+    var connectingWordId by rememberSaveable { mutableStateOf<String?>(null) }
+    var connectingWordText by rememberSaveable { mutableStateOf("") }
+    var connectingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
+    var noteSearchQuery by rememberSaveable { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf("") }
     val activeKnot = remember(knots, selectedKnotId) {
         knots.firstOrNull { it.knot.id == selectedKnotId } ?: knots.firstOrNull()
@@ -1046,40 +1059,83 @@ fun WordsScreen(
         editingWord = word
         addingRegister = registerType
         wordText = word?.text.orEmpty()
+        objectPartType = word?.objectPartType.orEmpty()
+        emotionalWeight = word?.emotionalWeight ?: if (registerType == BORROMEAN_REGISTER_AFFECT) 70 else 50
+        importanceWeight = word?.importanceWeight ?: 50
+        desireWeight = word?.desireWeight ?: if (registerType == BORROMEAN_REGISTER_DESIRE) 70 else 50
         error = ""
     }
+    fun openNoteConnector(wordId: String, wordText: String, conversationId: String?) {
+        connectingWordId = wordId
+        connectingWordText = wordText
+        connectingConversationId = conversationId
+        noteSearchQuery = wordText
+        error = ""
+    }
+    fun closeNoteConnector() {
+        connectingWordId = null
+        connectingWordText = ""
+        connectingConversationId = null
+        noteSearchQuery = ""
+    }
     fun saveWord() {
-        val knot = activeKnot ?: return
+        val knotId = activeKnot?.knot?.id ?: return
         val register = addingRegister ?: BORROMEAN_REGISTER_OBJECT_A
+        val savedText = wordText
         scope.launch {
-            val result = if (editingWord == null) {
-                viewModel.addBorromeanWord(knot.knot.id, wordText, register)
-                    .onSuccess { wordId -> onCreateLinkedNote(knot.knot.id, wordId) }
-                    .map { }
-            } else {
-                viewModel.renameBorromeanWord(requireNotNull(editingWord).id, wordText)
-                    .onSuccess {
-                        requireNotNull(editingWord).conversationId?.let(onOpenNote)
-                            ?: onCreateLinkedNote(knot.knot.id, requireNotNull(editingWord).id)
+            if (editingWord == null) {
+                viewModel.addBorromeanWord(
+                    knotId = knotId,
+                    text = savedText,
+                    registerType = register,
+                    objectPartType = objectPartType,
+                    emotionalWeight = emotionalWeight,
+                    importanceWeight = importanceWeight,
+                    desireWeight = desireWeight,
+                )
+                    .onSuccess { wordId ->
+                        editingWord = null
+                        addingRegister = null
+                        wordText = ""
+                        objectPartType = ""
+                        emotionalWeight = 50
+                        importanceWeight = 50
+                        desireWeight = 50
+                        error = ""
+                        openNoteConnector(wordId, savedText, null)
                     }
+                    .onFailure { error = it.message ?: "Could not save word." }
+            } else {
+                val word = requireNotNull(editingWord)
+                viewModel.updateBorromeanWordDetails(
+                    wordId = word.id,
+                    text = savedText,
+                    objectPartType = objectPartType,
+                    emotionalWeight = emotionalWeight,
+                    importanceWeight = importanceWeight,
+                    desireWeight = desireWeight,
+                )
+                    .onSuccess {
+                        editingWord = null
+                        addingRegister = null
+                        wordText = ""
+                        objectPartType = ""
+                        emotionalWeight = 50
+                        importanceWeight = 50
+                        desireWeight = 50
+                        error = ""
+                    }
+                    .onFailure { error = it.message ?: "Could not save word." }
             }
-            result
-                .onSuccess {
-                    editingWord = null
-                    addingRegister = null
-                    wordText = ""
-                    error = ""
-                }
-                .onFailure { error = it.message ?: "Could not save word." }
         }
     }
 
     Page(contentPadding = contentPadding) {
         item {
-            Text("Object a", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+            Text("Borromean Knot", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             Text(
-                "Words gather around one person, one knot, and the missing center they make visible.",
+                "The topological mind model introduced by Jacques Lacan.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(18.dp))
@@ -1088,21 +1144,67 @@ fun WordsScreen(
                 return@item
             }
             BorromeanObjectAHero(
+                viewModel = viewModel,
                 knot = activeKnot,
                 selectedRegister = selectedRegister,
+                rotationOffset = knotRotation,
+                stretchFactor = knotStretch,
                 onRegisterSelected = { selectedRegister = it },
+                onKnotTransform = { rotationDelta, stretchDelta ->
+                    knotRotation = (knotRotation + rotationDelta).coerceIn(-48f, 48f)
+                    knotStretch = (knotStretch * stretchDelta).coerceIn(0.72f, 1.32f)
+                },
                 onEditWord = { word -> openWordEditor(word, BORROMEAN_REGISTER_OBJECT_A) },
                 onAddObjectWord = { openWordEditor(null, BORROMEAN_REGISTER_OBJECT_A) },
+                onConnectWordNote = { word -> openNoteConnector(word.id, word.text, word.conversationId) },
+                onOpenNote = onOpenNote,
             )
             Spacer(Modifier.height(18.dp))
-            BorromeanRegisterWordsPanel(
-                knot = activeKnot,
-                selectedRegister = selectedRegister,
-                onAddWord = { openWordEditor(null, selectedRegister) },
-                onEditWord = { word -> openWordEditor(word, word.registerType) },
+            WeightedBorromeanWordSection(
+                viewModel = viewModel,
+                title = "Personally important words",
+                description = "These words are ordered by how important your mind currently feels they are. As you talk more, they may become less attached to emotional importance.",
+                words = activeKnot.words
+                    .filter { it.registerType == BORROMEAN_REGISTER_AFFECT }
+                    .sortedWith(compareByDescending<BorromeanWordEntity> { it.importanceWeight }.thenByDescending { it.emotionalWeight }),
+                primaryLabel = "Importance",
+                secondaryLabel = "Emotional attachment",
+                primaryValue = { it.importanceWeight },
+                secondaryValue = { it.emotionalWeight },
+                onAddWord = { openWordEditor(null, BORROMEAN_REGISTER_AFFECT) },
+                onEditWord = { openWordEditor(it, BORROMEAN_REGISTER_AFFECT) },
                 onDeleteWord = { word -> scope.launch { viewModel.deleteBorromeanWord(word.id) } },
-                onOpenOrCreateNote = { word ->
-                    word.conversationId?.let(onOpenNote) ?: onCreateLinkedNote(activeKnot.knot.id, word.id)
+                onConnectNote = { word -> openNoteConnector(word.id, word.text, word.conversationId) },
+                onOpenNote = onOpenNote,
+                onPrimaryChange = { word, value ->
+                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, word.emotionalWeight, value, word.desireWeight) }
+                },
+                onSecondaryChange = { word, value ->
+                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, value, word.importanceWeight, word.desireWeight) }
+                },
+            )
+            Spacer(Modifier.height(18.dp))
+            WeightedBorromeanWordSection(
+                viewModel = viewModel,
+                title = "What I truly want",
+                description = "These are words extracted from mother's words and remade as your own desire. You pursue them through your own words and power.",
+                words = activeKnot.words
+                    .filter { it.registerType == BORROMEAN_REGISTER_DESIRE }
+                    .sortedByDescending { it.desireWeight },
+                primaryLabel = "Desire",
+                secondaryLabel = "Importance",
+                primaryValue = { it.desireWeight },
+                secondaryValue = { it.importanceWeight },
+                onAddWord = { openWordEditor(null, BORROMEAN_REGISTER_DESIRE) },
+                onEditWord = { openWordEditor(it, BORROMEAN_REGISTER_DESIRE) },
+                onDeleteWord = { word -> scope.launch { viewModel.deleteBorromeanWord(word.id) } },
+                onConnectNote = { word -> openNoteConnector(word.id, word.text, word.conversationId) },
+                onOpenNote = onOpenNote,
+                onPrimaryChange = { word, value ->
+                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, word.emotionalWeight, word.importanceWeight, value) }
+                },
+                onSecondaryChange = { word, value ->
+                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, word.emotionalWeight, value, word.desireWeight) }
                 },
             )
             ErrorText(error)
@@ -1127,13 +1229,49 @@ fun WordsScreen(
             title = if (editingWord == null) "Add word" else "Edit word",
             registerType = addingRegister ?: BORROMEAN_REGISTER_OBJECT_A,
             text = wordText,
+            objectPartType = objectPartType,
+            emotionalWeight = emotionalWeight,
+            importanceWeight = importanceWeight,
+            desireWeight = desireWeight,
             onTextChange = { wordText = it },
+            onObjectPartTypeChange = { objectPartType = it },
+            onEmotionalWeightChange = { emotionalWeight = it },
+            onImportanceWeightChange = { importanceWeight = it },
+            onDesireWeightChange = { desireWeight = it },
             onDismiss = {
                 editingWord = null
                 addingRegister = null
                 wordText = ""
+                objectPartType = ""
             },
             onSave = ::saveWord,
+        )
+    }
+    val targetWordId = connectingWordId
+    val targetKnotId = activeKnot?.knot?.id
+    if (targetWordId != null && targetKnotId != null) {
+        BorromeanNoteConnectionSheet(
+            viewModel = viewModel,
+            wordText = connectingWordText,
+            linkedConversationId = connectingConversationId,
+            query = noteSearchQuery,
+            onQueryChange = { noteSearchQuery = it },
+            onDismiss = ::closeNoteConnector,
+            onConnectExisting = { conversationId ->
+                scope.launch {
+                    viewModel.linkBorromeanWordToConversation(targetWordId, conversationId)
+                        .onSuccess { closeNoteConnector() }
+                        .onFailure { error = it.message ?: "Could not connect note." }
+                }
+            },
+            onOpenNote = { conversationId ->
+                closeNoteConnector()
+                onOpenNote(conversationId)
+            },
+            onCreateNew = {
+                closeNoteConnector()
+                onCreateLinkedNote(targetKnotId, targetWordId)
+            },
         )
     }
 }
@@ -1247,15 +1385,22 @@ fun NotesScreen(
 
 @Composable
 private fun BorromeanObjectAHero(
+    viewModel: MainViewModel,
     knot: BorromeanKnotWithWords,
     selectedRegister: String,
+    rotationOffset: Float,
+    stretchFactor: Float,
     onRegisterSelected: (String) -> Unit,
+    onKnotTransform: (Float, Float) -> Unit,
     onEditWord: (BorromeanWordEntity) -> Unit,
     onAddObjectWord: () -> Unit,
+    onConnectWordNote: (BorromeanWordEntity) -> Unit,
+    onOpenNote: (String) -> Unit,
 ) {
     val objectWords = knot.words
         .filter { it.registerType == BORROMEAN_REGISTER_OBJECT_A }
         .sortedBy { it.sortOrder }
+    val objectGroups = objectWords.groupBy { it.objectPartType?.takeIf { type -> type.isNotBlank() } ?: "other" }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
@@ -1264,13 +1409,12 @@ private fun BorromeanObjectAHero(
         shadowElevation = 8.dp,
     ) {
         Column(modifier = Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(knot.knot.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(4.dp))
-            Text(knot.knot.description, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.74f))
-            Spacer(Modifier.height(14.dp))
             BorromeanKnotCanvas(
                 words = objectWords,
                 selectedRegister = selectedRegister,
+                rotationOffset = rotationOffset,
+                stretchFactor = stretchFactor,
+                onKnotTransform = onKnotTransform,
                 modifier = Modifier.fillMaxWidth().height(300.dp),
             )
             Spacer(Modifier.height(14.dp))
@@ -1292,7 +1436,7 @@ private fun BorromeanObjectAHero(
                     modifier = Modifier.weight(1f),
                 )
                 LacanRegisterChip(
-                    label = "Imaginary",
+                    label = "Imagination",
                     registerType = BORROMEAN_REGISTER_IMAGINARY,
                     selectedRegister = selectedRegister,
                     color = borromeanRegisterColor(BORROMEAN_REGISTER_IMAGINARY),
@@ -1301,8 +1445,15 @@ private fun BorromeanObjectAHero(
                 )
             }
             Spacer(Modifier.height(12.dp))
+            Text(
+                borromeanRegisterDescription(selectedRegister),
+                color = Color.White.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("object a words", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("object a fragments", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 TextButton(onClick = onAddObjectWord) {
                     Icon(Icons.Default.Add, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
@@ -1310,18 +1461,33 @@ private fun BorromeanObjectAHero(
                 }
             }
             if (objectWords.isEmpty()) {
-                Text("Add words for the center hole.", color = Color.White.copy(alpha = 0.62f))
+                Text("Add the leftover fragments the signifying chain cannot fully say.", color = Color.White.copy(alpha = 0.62f))
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                    objectWords.forEach { word ->
-                        Surface(
-                            onClick = { onEditWord(word) },
-                            shape = RoundedCornerShape(16.dp),
-                            color = Color.White.copy(alpha = 0.13f),
-                            contentColor = Color.White,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(word.text, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), fontWeight = FontWeight.Medium)
+                    objectGroups.forEach { (type, words) ->
+                        Text(objectPartLabel(type), color = Color.White.copy(alpha = 0.58f), style = MaterialTheme.typography.labelSmall)
+                        words.forEach { word ->
+                            Surface(
+                                onClick = { onEditWord(word) },
+                                shape = RoundedCornerShape(16.dp),
+                                color = Color.White.copy(alpha = 0.13f),
+                                contentColor = Color.White,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(word.text, fontWeight = FontWeight.Medium)
+                                    BorromeanWordNoteChip(
+                                        viewModel = viewModel,
+                                        word = word,
+                                        onConnectNote = { onConnectWordNote(word) },
+                                        onOpenNote = onOpenNote,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1334,6 +1500,9 @@ private fun BorromeanObjectAHero(
 private fun BorromeanKnotCanvas(
     words: List<BorromeanWordEntity>,
     selectedRegister: String,
+    rotationOffset: Float,
+    stretchFactor: Float,
+    onKnotTransform: (Float, Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val transition = rememberInfiniteTransition(label = "borromean")
@@ -1349,18 +1518,34 @@ private fun BorromeanKnotCanvas(
         animationSpec = infiniteRepeatable(animation = tween(1800), repeatMode = RepeatMode.Reverse),
         label = "pulse",
     )
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+    val stretch by transition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(animation = tween(4200), repeatMode = RepeatMode.Reverse),
+        label = "stableStretch",
+    )
+    Box(
+        modifier = modifier.pointerInput(Unit) {
+            detectTransformGestures { _, pan, zoom, rotation ->
+                val rotationDelta = rotation + pan.x * 0.05f
+                val stretchDelta = (zoom + pan.y * 0.001f).coerceIn(0.92f, 1.08f)
+                onKnotTransform(rotationDelta, stretchDelta)
+            }
+        },
+        contentAlignment = Alignment.Center,
+    ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val center = Offset(size.width / 2f, size.height / 2f)
             val ringWidth = size.minDimension * 0.12f
-            val ringSize = Size(size.minDimension * 0.72f, size.minDimension * 0.43f)
+            val projectedStretch = stretch * stretchFactor
+            val ringSize = Size(size.minDimension * 0.72f * projectedStretch, size.minDimension * 0.43f / projectedStretch)
             val glowSize = Size(ringSize.width + ringWidth * 0.9f, ringSize.height + ringWidth * 0.9f)
             val ringTopLeft = Offset(center.x - ringSize.width / 2f, center.y - ringSize.height / 2f)
             val glowTopLeft = Offset(center.x - glowSize.width / 2f, center.y - glowSize.height / 2f)
             val configs = listOf(
-                KnotRingConfig(BORROMEAN_REGISTER_REAL, -28f + rotationDrift.toFloat(), borromeanRegisterColor(BORROMEAN_REGISTER_REAL)),
-                KnotRingConfig(BORROMEAN_REGISTER_SYMBOLIC, 28f - rotationDrift.toFloat(), borromeanRegisterColor(BORROMEAN_REGISTER_SYMBOLIC)),
-                KnotRingConfig(BORROMEAN_REGISTER_IMAGINARY, 90f + rotationDrift * 0.7f, borromeanRegisterColor(BORROMEAN_REGISTER_IMAGINARY)),
+                KnotRingConfig(BORROMEAN_REGISTER_REAL, -28f + rotationDrift.toFloat() + rotationOffset, borromeanRegisterColor(BORROMEAN_REGISTER_REAL)),
+                KnotRingConfig(BORROMEAN_REGISTER_SYMBOLIC, 28f - rotationDrift.toFloat() + rotationOffset * 0.72f, borromeanRegisterColor(BORROMEAN_REGISTER_SYMBOLIC)),
+                KnotRingConfig(BORROMEAN_REGISTER_IMAGINARY, 90f + rotationDrift * 0.7f - rotationOffset * 0.45f, borromeanRegisterColor(BORROMEAN_REGISTER_IMAGINARY)),
             )
 
             drawCircle(
@@ -1390,19 +1575,39 @@ private fun BorromeanKnotCanvas(
                         size = ringSize,
                         style = Stroke(width = selectedWidth, cap = StrokeCap.Round),
                     )
-                    drawOval(
-                        brush = ComposeBrush.linearGradient(
-                            colors = listOf(config.color.copy(alpha = 0.62f), Color.White.copy(alpha = 0.92f), config.color),
-                            start = Offset(ringTopLeft.x, ringTopLeft.y),
-                            end = Offset(ringTopLeft.x + ringSize.width, ringTopLeft.y + ringSize.height),
-                        ),
+                    drawArc(
+                        color = config.color.copy(alpha = if (selected) 0.98f else 0.60f),
+                        startAngle = 12f,
+                        sweepAngle = 118f,
+                        useCenter = false,
                         topLeft = ringTopLeft,
                         size = ringSize,
                         style = Stroke(width = selectedWidth, cap = StrokeCap.Round),
                     )
-                    drawOval(
+                    drawArc(
+                        color = config.color.copy(alpha = if (selected) 0.58f else 0.34f),
+                        startAngle = 146f,
+                        sweepAngle = 88f,
+                        useCenter = false,
+                        topLeft = ringTopLeft,
+                        size = ringSize,
+                        style = Stroke(width = selectedWidth * 0.84f, cap = StrokeCap.Round),
+                    )
+                    drawArc(
+                        color = config.color.copy(alpha = if (selected) 0.98f else 0.62f),
+                        startAngle = 252f,
+                        sweepAngle = 96f,
+                        useCenter = false,
+                        topLeft = ringTopLeft,
+                        size = ringSize,
+                        style = Stroke(width = selectedWidth, cap = StrokeCap.Round),
+                    )
+                    drawArc(
                         color = Color.White.copy(alpha = 0.36f),
-                        topLeft = ringTopLeft + Offset(0f, -ringWidth * 0.26f),
+                        startAngle = 34f,
+                        sweepAngle = 72f,
+                        useCenter = false,
+                        topLeft = ringTopLeft + Offset(0f, -ringWidth * 0.18f),
                         size = ringSize,
                         style = Stroke(width = selectedWidth * 0.22f, cap = StrokeCap.Round),
                     )
@@ -1414,6 +1619,7 @@ private fun BorromeanKnotCanvas(
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("object a", color = Color.White.copy(alpha = 0.70f), style = MaterialTheme.typography.labelMedium)
+            Text("remainder / cause", color = Color.White.copy(alpha = 0.58f), style = MaterialTheme.typography.labelSmall)
             words.take(4).forEach { word ->
                 Surface(
                     shape = RoundedCornerShape(50),
@@ -1429,6 +1635,12 @@ private fun BorromeanKnotCanvas(
                 }
             }
         }
+        Text(
+            "stable while stretched",
+            color = Color.White.copy(alpha = 0.42f),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }
 
@@ -1455,39 +1667,51 @@ private fun LacanRegisterChip(
 }
 
 @Composable
-private fun BorromeanRegisterWordsPanel(
-    knot: BorromeanKnotWithWords,
-    selectedRegister: String,
+private fun WeightedBorromeanWordSection(
+    viewModel: MainViewModel,
+    title: String,
+    description: String,
+    words: List<BorromeanWordEntity>,
+    primaryLabel: String,
+    secondaryLabel: String,
+    primaryValue: (BorromeanWordEntity) -> Int,
+    secondaryValue: (BorromeanWordEntity) -> Int,
     onAddWord: () -> Unit,
     onEditWord: (BorromeanWordEntity) -> Unit,
     onDeleteWord: (BorromeanWordEntity) -> Unit,
-    onOpenOrCreateNote: (BorromeanWordEntity) -> Unit,
+    onConnectNote: (BorromeanWordEntity) -> Unit,
+    onOpenNote: (String) -> Unit,
+    onPrimaryChange: (BorromeanWordEntity, Int) -> Unit,
+    onSecondaryChange: (BorromeanWordEntity, Int) -> Unit,
 ) {
-    val words = knot.words.filter { it.registerType == selectedRegister }.sortedBy { it.sortOrder }
-    Surface(shape = RoundedCornerShape(20.dp), tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+    Surface(shape = RoundedCornerShape(22.dp), tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "${borromeanRegisterLabel(selectedRegister)} words",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 TextButton(onClick = onAddWord) {
                     Icon(Icons.Default.Add, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
                     Text("Add")
                 }
             }
+            Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             if (words.isEmpty()) {
-                Text("No words yet for this register.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("No words yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 words.forEach { word ->
-                    BorromeanWordRow(
+                    WeightedBorromeanWordRow(
+                        viewModel = viewModel,
                         word = word,
+                        primaryLabel = primaryLabel,
+                        secondaryLabel = secondaryLabel,
+                        primaryValue = primaryValue(word),
+                        secondaryValue = secondaryValue(word),
                         onEdit = { onEditWord(word) },
                         onDelete = { onDeleteWord(word) },
-                        onOpenOrCreateNote = { onOpenOrCreateNote(word) },
+                        onConnectNote = { onConnectNote(word) },
+                        onOpenNote = onOpenNote,
+                        onPrimaryChange = { onPrimaryChange(word, it) },
+                        onSecondaryChange = { onSecondaryChange(word, it) },
                     )
                 }
             }
@@ -1496,23 +1720,184 @@ private fun BorromeanRegisterWordsPanel(
 }
 
 @Composable
-private fun BorromeanWordRow(
+private fun WeightedBorromeanWordRow(
+    viewModel: MainViewModel,
     word: BorromeanWordEntity,
+    primaryLabel: String,
+    secondaryLabel: String,
+    primaryValue: Int,
+    secondaryValue: Int,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
-    onOpenOrCreateNote: () -> Unit,
+    onConnectNote: () -> Unit,
+    onOpenNote: (String) -> Unit,
+    onPrimaryChange: (Int) -> Unit,
+    onSecondaryChange: (Int) -> Unit,
 ) {
-    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)) {
-        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(word.text, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
-            TextButton(onClick = onOpenOrCreateNote) {
-                Text(if (word.conversationId == null) "Note" else "Open")
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(word.text, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit word")
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete word")
+                }
             }
-            IconButton(onClick = onEdit) {
-                Icon(Icons.Default.Edit, contentDescription = "Edit word")
+            BorromeanWordNoteChip(
+                viewModel = viewModel,
+                word = word,
+                onConnectNote = onConnectNote,
+                onOpenNote = onOpenNote,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            WeightStepper(label = primaryLabel, value = primaryValue, onChange = onPrimaryChange)
+            WeightStepper(label = secondaryLabel, value = secondaryValue, onChange = onSecondaryChange)
+        }
+    }
+}
+
+@Composable
+private fun WeightStepper(label: String, value: Int, onChange: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("$label $value", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { onChange((value - 5).coerceIn(0, 100)) }) {
+            Text("-")
+        }
+        OutlinedButton(onClick = { onChange((value + 5).coerceIn(0, 100)) }) {
+            Text("+")
+        }
+    }
+}
+
+@Composable
+private fun BorromeanWordNoteChip(
+    viewModel: MainViewModel,
+    word: BorromeanWordEntity,
+    onConnectNote: () -> Unit,
+    onOpenNote: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val conversationId = word.conversationId
+    if (conversationId == null) {
+        OutlinedButton(onClick = onConnectNote, modifier = modifier) {
+            Text("Connect note")
+        }
+    } else {
+        val note by viewModel.observeConversation(conversationId).collectAsState(initial = null)
+        val label = remember(note) {
+            note?.let { linkedNote ->
+                linkedNote.title.takeIf { it.isNotBlank() }
+                    ?: plainNoteText(linkedNote.finalNote).lineSequence().firstOrNull { it.isNotBlank() }
+                    ?: "Linked note"
+            } ?: "Linked note"
+        }
+        Surface(
+            modifier = modifier,
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                TextButton(onClick = { onOpenNote(conversationId) }) {
+                    Text("Open")
+                }
             }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete word")
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BorromeanNoteConnectionSheet(
+    viewModel: MainViewModel,
+    wordText: String,
+    linkedConversationId: String?,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConnectExisting: (String) -> Unit,
+    onOpenNote: (String) -> Unit,
+    onCreateNew: () -> Unit,
+) {
+    val notesFlow = remember(query) { viewModel.observeNotes(null, query, "", "") }
+    val notes by notesFlow.collectAsState(initial = emptyList())
+    val matches = remember(notes, query, linkedConversationId) {
+        rankedNoteSearchResults(notes, query)
+            .filter { it.note.id != linkedConversationId }
+            .take(6)
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Connect note", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Find notes related to \"$wordText\", connect one, or create a new linked note.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                label = { Text("Search notes") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text("Top matches", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (matches.isEmpty()) {
+                Text("No matching notes yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                matches.forEach { result ->
+                    NoteConnectionResultRow(
+                        result = result,
+                        onConnect = { onConnectExisting(result.note.id) },
+                        onOpen = { onOpenNote(result.note.id) },
+                    )
+                }
+            }
+            HorizontalDivider()
+            Button(onClick = onCreateNew, modifier = Modifier.fillMaxWidth()) {
+                Text("Create new linked note")
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun NoteConnectionResultRow(
+    result: NoteSearchResult,
+    onConnect: () -> Unit,
+    onOpen: () -> Unit,
+) {
+    Surface(shape = RoundedCornerShape(16.dp), tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(result.note.title.ifBlank { "Untitled note" }, fontWeight = FontWeight.SemiBold)
+            Text(
+                result.preview.ifBlank { "No preview available." },
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = onOpen, modifier = Modifier.weight(1f)) {
+                    Text("Open")
+                }
+                Button(onClick = onConnect, modifier = Modifier.weight(1f)) {
+                    Text("Connect")
+                }
             }
         }
     }
@@ -1565,7 +1950,15 @@ private fun BorromeanWordDialog(
     title: String,
     registerType: String,
     text: String,
+    objectPartType: String,
+    emotionalWeight: Int,
+    importanceWeight: Int,
+    desireWeight: Int,
     onTextChange: (String) -> Unit,
+    onObjectPartTypeChange: (String) -> Unit,
+    onEmotionalWeightChange: (Int) -> Unit,
+    onImportanceWeightChange: (Int) -> Unit,
+    onDesireWeightChange: (Int) -> Unit,
     onDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
@@ -1575,14 +1968,36 @@ private fun BorromeanWordDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Register: ${borromeanRegisterLabel(registerType)}")
+                Text(
+                    borromeanRegisterDescription(registerType),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 OutlinedTextField(
                     value = text,
                     onValueChange = onTextChange,
                     singleLine = true,
                     label = { Text("Word or phrase") },
                 )
+                if (registerType == BORROMEAN_REGISTER_OBJECT_A) {
+                    OutlinedTextField(
+                        value = objectPartType,
+                        onValueChange = onObjectPartTypeChange,
+                        singleLine = true,
+                        label = { Text("Object part type") },
+                        placeholder = { Text("gaze, voice, breast, excrement") },
+                    )
+                }
+                if (registerType == BORROMEAN_REGISTER_AFFECT) {
+                    WeightStepper("Personal importance", importanceWeight, onImportanceWeightChange)
+                    WeightStepper("Emotional attachment", emotionalWeight, onEmotionalWeightChange)
+                }
+                if (registerType == BORROMEAN_REGISTER_DESIRE) {
+                    WeightStepper("Desire strength", desireWeight, onDesireWeightChange)
+                    WeightStepper("Importance", importanceWeight, onImportanceWeightChange)
+                }
                 Text(
-                    "Saving will create or open a note where you can describe what this word is linked to.",
+                    "Saving will create or open a note where you can describe the memory, association, or remainder linked to this signifier.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -4028,6 +4443,8 @@ private const val BORROMEAN_REGISTER_OBJECT_A = "object_a"
 private const val BORROMEAN_REGISTER_REAL = "real"
 private const val BORROMEAN_REGISTER_SYMBOLIC = "symbolic"
 private const val BORROMEAN_REGISTER_IMAGINARY = "imaginary"
+private const val BORROMEAN_REGISTER_AFFECT = "affect"
+private const val BORROMEAN_REGISTER_DESIRE = "desire"
 
 private fun formatDate(instant: java.time.Instant): String = dateFormatter.format(instant)
 
@@ -4038,11 +4455,24 @@ private fun Context.deviceAuthAvailable(): Boolean =
 
 private fun borromeanRegisterLabel(registerType: String): String =
     when (registerType) {
-        BORROMEAN_REGISTER_OBJECT_A -> "object a"
-        BORROMEAN_REGISTER_REAL -> "Real"
+        BORROMEAN_REGISTER_OBJECT_A -> "object a fragments"
+        BORROMEAN_REGISTER_REAL -> "Real: things that happened"
         BORROMEAN_REGISTER_SYMBOLIC -> "Symbolic"
-        BORROMEAN_REGISTER_IMAGINARY -> "Imaginary"
+        BORROMEAN_REGISTER_IMAGINARY -> "Imagination: images generated"
+        BORROMEAN_REGISTER_AFFECT -> "Personally important words"
+        BORROMEAN_REGISTER_DESIRE -> "What I truly want"
         else -> registerType
+    }
+
+private fun borromeanRegisterDescription(registerType: String): String =
+    when (registerType) {
+        BORROMEAN_REGISTER_OBJECT_A -> "object a fragments: gaze, voice, breast, excrement."
+        BORROMEAN_REGISTER_REAL -> "You met with each other. Similar things happen between you and your mom that bring you back to old memories of familiarity."
+        BORROMEAN_REGISTER_SYMBOLIC -> "The words that are important for you."
+        BORROMEAN_REGISTER_IMAGINARY -> "Between what really happened and what you think about this person is the imagination."
+        BORROMEAN_REGISTER_AFFECT -> "Words ordered by personal importance, with emotional attachment that may change as the user speaks more."
+        BORROMEAN_REGISTER_DESIRE -> "Words extracted from mother's words and pursued through the user's own words and power."
+        else -> ""
     }
 
 private fun borromeanRegisterColor(registerType: String): Color =
@@ -4050,7 +4480,18 @@ private fun borromeanRegisterColor(registerType: String): Color =
         BORROMEAN_REGISTER_REAL -> Color(0xFFFF5D8F)
         BORROMEAN_REGISTER_SYMBOLIC -> Color(0xFF6CE5E8)
         BORROMEAN_REGISTER_IMAGINARY -> Color(0xFFFFD166)
+        BORROMEAN_REGISTER_AFFECT -> Color(0xFFFF8F3D)
+        BORROMEAN_REGISTER_DESIRE -> Color(0xFF8AE66E)
         else -> Color(0xFFFFFFFF)
+    }
+
+private fun objectPartLabel(type: String): String =
+    when (type.lowercase(Locale.getDefault())) {
+        "gaze" -> "gaze / eyes"
+        "voice" -> "voice"
+        "breast", "body" -> "breast / body"
+        "excrement", "gift", "control" -> "excrement / gift / control"
+        else -> type.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
     }
 
 private data class NoteSearchResult(

@@ -280,14 +280,42 @@ interface BorromeanDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertWord(word: BorromeanWordEntity)
 
-    @Query("UPDATE borromean_knots SET title = :title, description = :description, updatedAt = :updatedAt WHERE id = :knotId")
-    suspend fun updateKnot(knotId: String, title: String, description: String, updatedAt: Instant)
+    @Query("UPDATE borromean_knots SET title = :title, description = :description, personName = :personName, theoryNote = :theoryNote, updatedAt = :updatedAt WHERE id = :knotId")
+    suspend fun updateKnot(knotId: String, title: String, description: String, personName: String?, theoryNote: String, updatedAt: Instant)
 
     @Query("UPDATE borromean_knots SET isArchived = 1, updatedAt = :updatedAt WHERE id = :knotId")
     suspend fun archiveKnot(knotId: String, updatedAt: Instant)
 
     @Query("UPDATE borromean_words SET text = :text, updatedAt = :updatedAt WHERE id = :wordId")
     suspend fun updateWord(wordId: String, text: String, updatedAt: Instant)
+
+    @Query(
+        """
+        UPDATE borromean_words
+        SET text = :text,
+            objectPartType = :objectPartType,
+            emotionalWeight = :emotionalWeight,
+            importanceWeight = :importanceWeight,
+            desireWeight = :desireWeight,
+            updatedAt = :updatedAt
+        WHERE id = :wordId
+        """,
+    )
+    suspend fun updateWordDetails(
+        wordId: String,
+        text: String,
+        objectPartType: String?,
+        emotionalWeight: Int,
+        importanceWeight: Int,
+        desireWeight: Int,
+        updatedAt: Instant,
+    )
+
+    @Query("UPDATE borromean_words SET emotionalWeight = :emotionalWeight, importanceWeight = :importanceWeight, desireWeight = :desireWeight, updatedAt = :updatedAt WHERE id = :wordId")
+    suspend fun updateWordWeights(wordId: String, emotionalWeight: Int, importanceWeight: Int, desireWeight: Int, updatedAt: Instant)
+
+    @Query("UPDATE borromean_words SET text = :newText, updatedAt = :updatedAt WHERE text = :oldText")
+    suspend fun replaceWordText(oldText: String, newText: String, updatedAt: Instant)
 
     @Query("UPDATE borromean_words SET conversationId = :conversationId, updatedAt = :updatedAt WHERE id = :wordId")
     suspend fun linkWordToConversation(wordId: String, conversationId: String, updatedAt: Instant)

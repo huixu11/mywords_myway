@@ -27,7 +27,10 @@ class DefaultWordRepository(
         nounDao.observeNounsWithLinks()
 
     override fun observeBorromeanKnots(): Flow<List<BorromeanKnotWithWords>> =
-        borromeanDao.observeKnotsWithWords().onStart { ensureStarterBorromeanKnots() }
+        borromeanDao.observeKnotsWithWords().onStart {
+            normalizeLegacyBorromeanWords()
+            ensureStarterBorromeanKnots()
+        }
 
     override fun observeSuggestions(conversationId: String): Flow<List<NounSuggestionEntity>> =
         nounDao.observeSuggestionsForConversation(conversationId)
@@ -111,7 +114,7 @@ class DefaultWordRepository(
         nounDao.deletePendingSuggestions()
     }
 
-    override suspend fun createBorromeanKnot(title: String, description: String): String {
+    override suspend fun createBorromeanKnot(title: String, description: String, personName: String?, theoryNote: String): String {
         val cleanTitle = title.trim().ifBlank { "Untitled knot" }
         val now = clock.instant()
         val id = UUID.randomUUID().toString()
@@ -120,6 +123,8 @@ class DefaultWordRepository(
                 id = id,
                 title = cleanTitle,
                 description = description.trim(),
+                personName = personName?.trim()?.takeIf { it.isNotEmpty() },
+                theoryNote = theoryNote.trim(),
                 createdAt = now,
                 updatedAt = now,
                 sortOrder = borromeanDao.countKnots(),
@@ -129,11 +134,13 @@ class DefaultWordRepository(
         return id
     }
 
-    override suspend fun renameBorromeanKnot(knotId: String, title: String, description: String) {
+    override suspend fun renameBorromeanKnot(knotId: String, title: String, description: String, personName: String?, theoryNote: String) {
         borromeanDao.updateKnot(
             knotId = knotId,
             title = title.trim().ifBlank { "Untitled knot" },
             description = description.trim(),
+            personName = personName?.trim()?.takeIf { it.isNotEmpty() },
+            theoryNote = theoryNote.trim(),
             updatedAt = clock.instant(),
         )
     }
@@ -142,7 +149,15 @@ class DefaultWordRepository(
         borromeanDao.archiveKnot(knotId, clock.instant())
     }
 
-    override suspend fun addBorromeanWord(knotId: String, text: String, registerType: String): String {
+    override suspend fun addBorromeanWord(
+        knotId: String,
+        text: String,
+        registerType: String,
+        objectPartType: String?,
+        emotionalWeight: Int,
+        importanceWeight: Int,
+        desireWeight: Int,
+    ): String {
         val cleanText = text.trim()
         require(cleanText.isNotEmpty()) { "Word is required." }
         val cleanRegister = requireValidBorromeanRegister(registerType)
@@ -154,6 +169,10 @@ class DefaultWordRepository(
                 knotId = knotId,
                 text = cleanText,
                 registerType = cleanRegister,
+                objectPartType = objectPartType?.trim()?.lowercase()?.takeIf { it.isNotEmpty() },
+                emotionalWeight = emotionalWeight.coerceIn(0, 100),
+                importanceWeight = importanceWeight.coerceIn(0, 100),
+                desireWeight = desireWeight.coerceIn(0, 100),
                 conversationId = null,
                 createdAt = now,
                 updatedAt = now,
@@ -167,6 +186,37 @@ class DefaultWordRepository(
         val cleanText = text.trim()
         require(cleanText.isNotEmpty()) { "Word is required." }
         borromeanDao.updateWord(wordId, cleanText, clock.instant())
+    }
+
+    override suspend fun updateBorromeanWordDetails(
+        wordId: String,
+        text: String,
+        objectPartType: String?,
+        emotionalWeight: Int,
+        importanceWeight: Int,
+        desireWeight: Int,
+    ) {
+        val cleanText = text.trim()
+        require(cleanText.isNotEmpty()) { "Word is required." }
+        borromeanDao.updateWordDetails(
+            wordId = wordId,
+            text = cleanText,
+            objectPartType = objectPartType?.trim()?.lowercase()?.takeIf { it.isNotEmpty() },
+            emotionalWeight = emotionalWeight.coerceIn(0, 100),
+            importanceWeight = importanceWeight.coerceIn(0, 100),
+            desireWeight = desireWeight.coerceIn(0, 100),
+            updatedAt = clock.instant(),
+        )
+    }
+
+    override suspend fun updateBorromeanWordWeights(wordId: String, emotionalWeight: Int, importanceWeight: Int, desireWeight: Int) {
+        borromeanDao.updateWordWeights(
+            wordId = wordId,
+            emotionalWeight = emotionalWeight.coerceIn(0, 100),
+            importanceWeight = importanceWeight.coerceIn(0, 100),
+            desireWeight = desireWeight.coerceIn(0, 100),
+            updatedAt = clock.instant(),
+        )
     }
 
     override suspend fun deleteBorromeanWord(wordId: String) {
@@ -189,6 +239,8 @@ class DefaultWordRepository(
                         id = knotId,
                         title = starter.title,
                         description = starter.description,
+                        personName = starter.personName,
+                        theoryNote = starter.theoryNote,
                         createdAt = now,
                         updatedAt = now,
                         sortOrder = knotIndex,
@@ -202,6 +254,10 @@ class DefaultWordRepository(
                             knotId = knotId,
                             text = word.text,
                             registerType = word.registerType,
+                            objectPartType = word.objectPartType,
+                            emotionalWeight = word.emotionalWeight,
+                            importanceWeight = word.importanceWeight,
+                            desireWeight = word.desireWeight,
                             conversationId = null,
                             createdAt = now,
                             updatedAt = now,
@@ -211,6 +267,14 @@ class DefaultWordRepository(
                 }
             }
         }
+    }
+
+    private suspend fun normalizeLegacyBorromeanWords() {
+        borromeanDao.replaceWordText(
+            oldText = "粪便",
+            newText = "excrement",
+            updatedAt = clock.instant(),
+        )
     }
 
     private fun requireValidBorromeanRegister(registerType: String): String {
@@ -223,57 +287,61 @@ class DefaultWordRepository(
 private data class StarterBorromeanKnot(
     val title: String,
     val description: String,
+    val personName: String?,
+    val theoryNote: String,
     val words: List<StarterBorromeanWord>,
 )
 
 private data class StarterBorromeanWord(
     val text: String,
     val registerType: String,
+    val objectPartType: String? = null,
+    val emotionalWeight: Int = 50,
+    val importanceWeight: Int = 50,
+    val desireWeight: Int = 50,
 )
 
-private val validBorromeanRegisters = setOf("object_a", "real", "symbolic", "imaginary")
+private val validBorromeanRegisters = setOf("object_a", "real", "symbolic", "imaginary", "affect", "desire")
 
 private val starterBorromeanKnots = listOf(
     StarterBorromeanKnot(
-        title = "A person who carries object a",
-        description = "The words gather around one person and the missing center they make visible.",
+        title = "Mother / first object a",
+        description = "S1 calls a field of memories; the leftover pull appears around the gaze, voice, breast, and excrement.",
+        personName = "Mother / first object a",
+        theoryNote = "The knot can stretch or rotate, but the topology remains. A new knot forms when desire reorganizes around another object/cause.",
         words = listOf(
-            StarterBorromeanWord("chilled mung bean soup", "object_a"),
-            StarterBorromeanWord("eyes when she smiles", "object_a"),
-            StarterBorromeanWord("her hair", "object_a"),
-            StarterBorromeanWord("my city", "real"),
-            StarterBorromeanWord("dinner", "real"),
-            StarterBorromeanWord("reluctant", "real"),
-            StarterBorromeanWord("respect", "real"),
-            StarterBorromeanWord("beautiful", "real"),
-            StarterBorromeanWord("appearance like my mom", "real"),
-            StarterBorromeanWord("money", "symbolic"),
-            StarterBorromeanWord("good person", "symbolic"),
-            StarterBorromeanWord("respect", "symbolic"),
-            StarterBorromeanWord("awkward", "imaginary"),
-            StarterBorromeanWord("warm", "imaginary"),
-            StarterBorromeanWord("cares about me", "imaginary"),
-            StarterBorromeanWord("breast", "imaginary"),
-            StarterBorromeanWord("kiss", "imaginary"),
+            StarterBorromeanWord("gaze / eyes", "object_a", objectPartType = "gaze"),
+            StarterBorromeanWord("voice", "object_a", objectPartType = "voice"),
+            StarterBorromeanWord("breast", "object_a", objectPartType = "breast"),
+            StarterBorromeanWord("excrement", "object_a", objectPartType = "excrement"),
+            StarterBorromeanWord("respect", "affect", emotionalWeight = 86, importanceWeight = 78),
+            StarterBorromeanWord("money", "affect", emotionalWeight = 74, importanceWeight = 82),
+            StarterBorromeanWord("good person", "affect", emotionalWeight = 70, importanceWeight = 76),
+            StarterBorromeanWord("solve scientific problems", "desire", desireWeight = 88, importanceWeight = 84),
+            StarterBorromeanWord("earn money", "desire", desireWeight = 68, importanceWeight = 80),
+            StarterBorromeanWord("make my own choice", "desire", desireWeight = 92, importanceWeight = 88),
         ),
     ),
     StarterBorromeanKnot(
         title = "Rain At The Window",
         description = "Another possible knot from older notes.",
+        personName = "Rain At The Window",
+        theoryNote = "The knot can stretch or rotate, but the topology remains.",
         words = listOf(
-            StarterBorromeanWord("wet pavement", "object_a"),
-            StarterBorromeanWord("blue umbrella", "real"),
-            StarterBorromeanWord("the pause before yes", "symbolic"),
-            StarterBorromeanWord("coffee steam", "imaginary"),
+            StarterBorromeanWord("wet pavement", "object_a", objectPartType = "gaze"),
+            StarterBorromeanWord("waiting", "affect", emotionalWeight = 66, importanceWeight = 52),
+            StarterBorromeanWord("leave first", "desire", desireWeight = 61),
         ),
     ),
     StarterBorromeanKnot(
         title = "Library Afternoon",
         description = "A quieter constellation of object a words.",
+        personName = "Library Afternoon",
+        theoryNote = "The knot can stretch or rotate, but the topology remains.",
         words = listOf(
-            StarterBorromeanWord("pencil dust", "object_a"),
-            StarterBorromeanWord("green desk lamp", "real"),
-            StarterBorromeanWord("wrist near the margin", "imaginary"),
+            StarterBorromeanWord("pencil dust", "object_a", objectPartType = "excrement"),
+            StarterBorromeanWord("quiet", "affect", emotionalWeight = 48, importanceWeight = 65),
+            StarterBorromeanWord("study freely", "desire", desireWeight = 74),
         ),
     ),
 )

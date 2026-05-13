@@ -81,25 +81,32 @@ private fun MyWordsApp(viewModel: MainViewModel) {
             modifier = Modifier,
         ) {
             composable(
-                route = "note/{conversationId}",
-                arguments = listOf(navArgument("conversationId") { type = NavType.StringType }),
+                route = "note/{conversationId}?source={source}",
+                arguments = listOf(
+                    navArgument("conversationId") { type = NavType.StringType },
+                    navArgument("source") {
+                        type = NavType.StringType
+                        defaultValue = "notes"
+                    },
+                ),
             ) { entry ->
                 val conversationId = requireNotNull(entry.arguments?.getString("conversationId"))
+                val returnRoute = if (entry.arguments?.getString("source") == "words") "words" else "notes"
                 WriteNoteScreen(
                     viewModel = viewModel,
                     conversationId = conversationId,
                     contentPadding = padding,
                     reviewAfterSave = false,
                     onBack = {
-                        if (!navController.popBackStack("notes", inclusive = false)) {
-                            navController.navigate("notes") {
+                        if (!navController.popBackStack(returnRoute, inclusive = false)) {
+                            navController.navigate(returnRoute) {
                                 launchSingleTop = true
                             }
                         }
                     },
                     onSaved = {
-                        if (!navController.popBackStack("notes", inclusive = false)) {
-                            navController.navigate("notes") {
+                        if (!navController.popBackStack(returnRoute, inclusive = false)) {
+                            navController.navigate(returnRoute) {
                                 launchSingleTop = true
                             }
                         }
@@ -122,21 +129,21 @@ private fun MyWordsApp(viewModel: MainViewModel) {
                 NotesScreen(
                     viewModel = viewModel,
                     contentPadding = padding,
-                    onNewNote = { conversationId -> navController.navigate("note/$conversationId") },
-                    onEditNote = { conversationId -> navController.navigate("note/$conversationId") },
+                    onNewNote = { conversationId -> navController.navigate("note/$conversationId?source=notes") },
+                    onEditNote = { conversationId -> navController.navigate("note/$conversationId?source=notes") },
                 )
             }
             composable("words") {
                 WordsScreen(
                     viewModel = viewModel,
                     contentPadding = padding,
-                    onOpenNote = { conversationId -> navController.navigate("note/$conversationId") },
+                    onOpenNote = { conversationId -> navController.navigate("note/$conversationId?source=words") },
                     onCreateLinkedNote = { _, wordId ->
                         scope.launch {
                             viewModel.startNote()
                                 .onSuccess { conversationId ->
                                     viewModel.linkBorromeanWordToConversation(wordId, conversationId)
-                                    navController.navigate("note/$conversationId")
+                                    navController.navigate("note/$conversationId?source=words")
                                 }
                         }
                     },
