@@ -10,13 +10,18 @@ import java.io.File
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+data class TextExportFile(
+    val uri: Uri,
+    val text: String,
+)
+
 class NotesExporter(
     private val context: Context,
     private val database: AppDatabase,
 ) {
     private val dateFormatter = DateTimeFormatter.ofPattern("MMM dd, yyyy").withZone(ZoneId.systemDefault())
 
-    suspend fun writeNotesOnlyExport(): Uri = withContext(Dispatchers.IO) {
+    suspend fun writeNotesOnlyExport(): TextExportFile = withContext(Dispatchers.IO) {
         val notes = database.conversationDao().getAllNotes()
         val linksByConversation = database.nounDao()
             .getExportLinks()
@@ -45,10 +50,75 @@ class NotesExporter(
         val outputDir = File(context.cacheDir, "exports").apply { mkdirs() }
         val outputFile = File(outputDir, "my_words_my_way_notes.txt")
         outputFile.writeText(exportText)
-        FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            outputFile,
+        TextExportFile(
+            uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                outputFile,
+            ),
+            text = exportText,
         )
+    }
+
+    suspend fun writeWordsExport(): TextExportFile = withContext(Dispatchers.IO) {
+        val nouns = database.nounDao().getConfirmedNounNames()
+        val knots = database.borromeanDao().getKnotsWithWords()
+        val exportText = buildString {
+            appendLine("My Words, My Way")
+            appendLine("Words export")
+            appendLine()
+            if (nouns.isNotEmpty()) {
+                appendLine("Saved words")
+                nouns.forEach { noun -> appendLine("- $noun") }
+                appendLine()
+            }
+            appendLine("Borromean knots")
+            knots.forEach { knotWithWords ->
+                appendLine(knotWithWords.knot.title)
+                if (knotWithWords.knot.description.isNotBlank()) {
+                    appendLine(knotWithWords.knot.description)
+                }
+                appendWordsSection("object a fragments", knotWithWords.words.filter { it.registerType == "object_a" })
+                appendWordsSection(
+                    "Personally important words",
+                    knotWithWords.words
+                        .filter { it.registerType == "affect" }
+                        .sortedWith(compareByDescending { it.importanceWeight }),
+                )
+                appendWordsSection(
+                    "What I truly want",
+                    knotWithWords.words
+                        .filter { it.registerType == "desire" }
+                        .sortedByDescending { it.desireWeight },
+                )
+                appendLine()
+            }
+        }
+        val outputDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val outputFile = File(outputDir, "my_words_my_way_words.txt")
+        outputFile.writeText(exportText)
+        TextExportFile(
+            uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                outputFile,
+            ),
+            text = exportText,
+        )
+    }
+
+    private fun StringBuilder.appendWordsSection(title: String, words: List<com.mywordsmyway.data.local.BorromeanWordEntity>) {
+        if (words.isEmpty()) return
+        appendLine(title)
+        words.forEach { word ->
+            val metadata = buildList {
+                if (word.objectPartType?.isNotBlank() == true) add("type: ${word.objectPartType}")
+                add("importance: ${word.importanceWeight}")
+                add("emotional attachment: ${word.emotionalWeight}")
+                add("desire: ${word.desireWeight}")
+            }.joinToString(", ")
+            appendLine("- ${word.text} ($metadata)")
+        }
+        appendLine()
     }
 }

@@ -268,6 +268,10 @@ interface BorromeanDao {
     @Query("SELECT * FROM borromean_knots WHERE isArchived = 0 ORDER BY sortOrder ASC, updatedAt DESC")
     fun observeKnotsWithWords(): Flow<List<BorromeanKnotWithWords>>
 
+    @Transaction
+    @Query("SELECT * FROM borromean_knots WHERE isArchived = 0 ORDER BY sortOrder ASC, updatedAt DESC")
+    suspend fun getKnotsWithWords(): List<BorromeanKnotWithWords>
+
     @Query("SELECT COUNT(*) FROM borromean_knots")
     suspend fun countKnots(): Int
 

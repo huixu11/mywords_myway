@@ -166,6 +166,7 @@ import com.mywordsmyway.data.local.VoiceMemoEntity
 import com.mywordsmyway.data.model.LISTENING_QUESTION
 import com.mywordsmyway.data.model.NoteFileAttachment
 import com.mywordsmyway.data.model.SUPPORT_MESSAGE
+import com.mywordsmyway.storage.TextExportFile
 import com.mywordsmyway.storage.plainNoteText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1438,7 +1439,7 @@ private fun BorromeanObjectAHero(
                     modifier = Modifier.weight(1f),
                 )
                 LacanRegisterChip(
-                    label = "Imagination",
+                    label = "Imaginary",
                     registerType = BORROMEAN_REGISTER_IMAGINARY,
                     selectedRegister = selectedRegister,
                     color = borromeanRegisterColor(BORROMEAN_REGISTER_IMAGINARY),
@@ -2161,6 +2162,9 @@ fun PrivacyScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showExportDialog by rememberSaveable { mutableStateOf(false) }
+    var showWordsExportDialog by rememberSaveable { mutableStateOf(false) }
+    var showDeleteAudioDialog by rememberSaveable { mutableStateOf(false) }
+    var deleteAudioConfirmation by rememberSaveable { mutableStateOf("") }
     val progress = (usage.usedBytes.toFloat() / usage.limitBytes.toFloat()).coerceIn(0f, 1f)
 
     Page(contentPadding = contentPadding) {
@@ -2174,17 +2178,20 @@ fun PrivacyScreen(
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(18.dp))
             Text(
-                "Audio and note images stay on this device. New notes do not save transcripts. When app data is larger than 1 GB, the oldest audio is deleted. Notes are kept. Saved words are managed in My Words.",
+                "Notes are precious, so they can only be deleted one at a time from the Notes page. When app data is larger than 1 GB, the oldest audio is deleted. Notes are kept. Saved words are managed in My Words.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(22.dp))
             OutlinedButton(
-                onClick = { scope.launch { viewModel.deleteOldAudioNow() } },
+                onClick = {
+                    deleteAudioConfirmation = ""
+                    showDeleteAudioDialog = true
+                },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Default.Delete, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Delete old audio now")
+                Text("Delete saved voice memo audio")
             }
             Spacer(Modifier.height(8.dp))
             Button(onClick = { showExportDialog = true }, modifier = Modifier.fillMaxWidth()) {
@@ -2192,18 +2199,54 @@ fun PrivacyScreen(
                 Spacer(Modifier.width(8.dp))
                 Text("Export notes only")
             }
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { showWordsExportDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Share, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Export words")
+            }
         }
     }
 
     if (showExportDialog) {
         ExportDialog(
+            title = "Export notes only?",
+            includedItems = listOf("your written notes", "dates", "linked confirmed nouns"),
+            excludedItems = listOf("audio", "note images"),
             onDismiss = { showExportDialog = false },
             onExport = {
                 showExportDialog = false
                 scope.launch {
                     viewModel.createNotesOnlyExport()
-                        .onSuccess { shareTextFile(context, it) }
+                        .onSuccess { shareTextFile(context, it, "Export notes only") }
                 }
+            },
+        )
+    }
+    if (showWordsExportDialog) {
+        ExportDialog(
+            title = "Export words?",
+            includedItems = listOf("saved words", "object a fragments", "personally important words", "what I truly want"),
+            excludedItems = listOf("audio", "note images"),
+            onDismiss = { showWordsExportDialog = false },
+            onExport = {
+                showWordsExportDialog = false
+                scope.launch {
+                    viewModel.createWordsExport()
+                        .onSuccess { shareTextFile(context, it, "Export words") }
+                }
+            },
+        )
+    }
+    if (showDeleteAudioDialog) {
+        DeleteAudioConfirmationDialog(
+            confirmationText = deleteAudioConfirmation,
+            onConfirmationTextChange = { deleteAudioConfirmation = it },
+            onDismiss = { showDeleteAudioDialog = false },
+            onDelete = {
+                showDeleteAudioDialog = false
+                deleteAudioConfirmation = ""
+                scope.launch { viewModel.deleteOldAudioNow() }
             },
         )
     }
@@ -4408,27 +4451,70 @@ private fun rememberImageBitmap(imagePath: String) = produceState<ImageBitmap?>(
 
 @Composable
 private fun ExportDialog(
+    title: String,
+    includedItems: List<String>,
+    excludedItems: List<String>,
     onDismiss: () -> Unit,
     onExport: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Export notes only?") },
+        title = { Text(title) },
         text = {
             Column {
                 Text("This export includes:")
-                Text("- your written notes")
-                Text("- dates")
-                Text("- linked confirmed nouns")
+                includedItems.forEach { item -> Text("- $item") }
                 Spacer(Modifier.height(10.dp))
                 Text("It does not include:")
-                Text("- audio")
-                Text("- note images")
+                excludedItems.forEach { item -> Text("- $item") }
             }
         },
         confirmButton = {
             TextButton(onClick = onExport) {
                 Text("Export")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DeleteAudioConfirmationDialog(
+    confirmationText: String,
+    onConfirmationTextChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val requiredText = "DELETE AUDIO"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete saved voice memo audio?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "This deletes saved audio files for voice memos that are eligible for storage cleanup. Notes, words, images, and visible note text are kept.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text("Type $requiredText to confirm.")
+                OutlinedTextField(
+                    value = confirmationText,
+                    onValueChange = onConfirmationTextChange,
+                    singleLine = true,
+                    label = { Text("Confirmation") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDelete,
+                enabled = confirmationText.trim() == requiredText,
+            ) {
+                Text("Delete audio")
             }
         },
         dismissButton = {
@@ -4447,13 +4533,15 @@ private fun ErrorText(message: String) {
     }
 }
 
-private fun shareTextFile(context: Context, uri: Uri) {
+private fun shareTextFile(context: Context, export: TextExportFile, chooserTitle: String) {
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
-        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_SUBJECT, chooserTitle)
+        putExtra(Intent.EXTRA_TEXT, export.text)
+        putExtra(Intent.EXTRA_STREAM, export.uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    context.startActivity(Intent.createChooser(intent, "Export notes only"))
+    context.startActivity(Intent.createChooser(intent, chooserTitle))
 }
 
 private val dateFormatter = DateTimeFormatter.ofPattern("MMM dd, yyyy").withZone(ZoneId.systemDefault())
@@ -4484,7 +4572,7 @@ private fun borromeanRegisterLabel(registerType: String): String =
         BORROMEAN_REGISTER_OBJECT_A -> "object a fragments"
         BORROMEAN_REGISTER_REAL -> "Real: things that happened"
         BORROMEAN_REGISTER_SYMBOLIC -> "Symbolic"
-        BORROMEAN_REGISTER_IMAGINARY -> "Imagination: images generated"
+        BORROMEAN_REGISTER_IMAGINARY -> "Imaginary: images generated"
         BORROMEAN_REGISTER_AFFECT -> "Personally important words"
         BORROMEAN_REGISTER_DESIRE -> "What I truly want"
         else -> registerType
@@ -4495,7 +4583,7 @@ private fun borromeanRegisterDescription(registerType: String): String =
         BORROMEAN_REGISTER_OBJECT_A -> "object a fragments: gaze, voice, breast, excrement."
         BORROMEAN_REGISTER_REAL -> "You met with each other. Similar things happen between you and your mom that bring you back to old memories of familiarity."
         BORROMEAN_REGISTER_SYMBOLIC -> "The words that are important for you."
-        BORROMEAN_REGISTER_IMAGINARY -> "Between what really happened and what you think about this person is the imagination."
+        BORROMEAN_REGISTER_IMAGINARY -> "Between what really happened and what you think about this person is the imaginary."
         BORROMEAN_REGISTER_AFFECT -> "Words ordered by personal importance, with emotional attachment that may change as the user speaks more."
         BORROMEAN_REGISTER_DESIRE -> "Words extracted from mother's words and pursued through the user's own words and power."
         else -> ""

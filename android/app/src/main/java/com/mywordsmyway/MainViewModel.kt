@@ -23,6 +23,7 @@ import com.mywordsmyway.data.repository.StorageRepository
 import com.mywordsmyway.data.repository.WordRepository
 import com.mywordsmyway.recorder.AndroidAudioRecorder
 import com.mywordsmyway.storage.NotesExporter
+import com.mywordsmyway.storage.TextExportFile
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -317,8 +318,12 @@ class MainViewModel(
         storageRepository.deleteAllHiddenTranscripts()
     }
 
-    suspend fun createNotesOnlyExport(): Result<Uri> = runCatching {
+    suspend fun createNotesOnlyExport(): Result<TextExportFile> = runCatching {
         notesExporter.writeNotesOnlyExport()
+    }
+
+    suspend fun createWordsExport(): Result<TextExportFile> = runCatching {
+        notesExporter.writeWordsExport()
     }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
