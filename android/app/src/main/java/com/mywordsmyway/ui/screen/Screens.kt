@@ -51,6 +51,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Brush
@@ -444,6 +446,9 @@ fun WriteNoteScreen(
     var attachmentMenuOpen by remember { mutableStateOf(false) }
     var title by rememberSaveable { mutableStateOf("") }
     var noteField by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
+    var noteUndoStack by remember { mutableStateOf(emptyList<NoteEditSnapshot>()) }
+    var noteRedoStack by remember { mutableStateOf(emptyList<NoteEditSnapshot>()) }
+    var suppressUndoCapture by remember { mutableStateOf(false) }
     var activeInlineFormatNames by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var loadedConversationId by rememberSaveable { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf("") }
@@ -476,10 +481,41 @@ fun WriteNoteScreen(
         }
         pendingDeviceAuthSuccess = null
     }
-    fun insertIntoNote(snippet: String) {
-        noteField = noteField.insertAtSelection(snippet)
+    fun currentEditSnapshot(): NoteEditSnapshot = NoteEditSnapshot(title = title, note = noteField)
+    fun updateEditState(nextTitle: String = title, nextNote: TextFieldValue = noteField) {
+        if (!suppressUndoCapture && (nextTitle != title || nextNote.text != noteField.text)) {
+            noteUndoStack = (noteUndoStack + currentEditSnapshot()).takeLast(60)
+            noteRedoStack = emptyList()
+        }
+        title = nextTitle
+        noteField = nextNote
         error = ""
         savedNotice = ""
+    }
+    fun undoNoteEdit() {
+        val previous = noteUndoStack.lastOrNull() ?: return
+        suppressUndoCapture = true
+        noteUndoStack = noteUndoStack.dropLast(1)
+        noteRedoStack = (noteRedoStack + currentEditSnapshot()).takeLast(60)
+        title = previous.title
+        noteField = previous.note
+        error = ""
+        savedNotice = ""
+        suppressUndoCapture = false
+    }
+    fun redoNoteEdit() {
+        val next = noteRedoStack.lastOrNull() ?: return
+        suppressUndoCapture = true
+        noteRedoStack = noteRedoStack.dropLast(1)
+        noteUndoStack = (noteUndoStack + currentEditSnapshot()).takeLast(60)
+        title = next.title
+        noteField = next.note
+        error = ""
+        savedNotice = ""
+        suppressUndoCapture = false
+    }
+    fun insertIntoNote(snippet: String) {
+        updateEditState(nextNote = noteField.insertAtSelection(snippet))
     }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -523,9 +559,13 @@ fun WriteNoteScreen(
     LaunchedEffect(conversation?.id) {
         val loaded = conversation ?: return@LaunchedEffect
         if (loadedConversationId == loaded.id) return@LaunchedEffect
+        suppressUndoCapture = true
         title = loaded.title.takeUnless { it == "Untitled reflection" || it == "Untitled note" }.orEmpty()
         noteField = TextFieldValue(loaded.finalNote, selection = TextRange(loaded.finalNote.length))
+        noteUndoStack = emptyList()
+        noteRedoStack = emptyList()
         loadedConversationId = loaded.id
+        suppressUndoCapture = false
     }
     fun applyFormat(format: NoteFormat) {
         if (format.isInline && noteField.selection.collapsed) {
@@ -535,7 +575,7 @@ fun WriteNoteScreen(
                 activeInlineFormatNames + format.name
             }
         } else {
-            noteField = noteField.applyNoteFormat(format)
+            updateEditState(nextNote = noteField.applyNoteFormat(format))
         }
         error = ""
         savedNotice = ""
@@ -618,35 +658,11 @@ fun WriteNoteScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 20.dp),
-            contentPadding = PaddingValues(
-                top = contentPadding.calculateTopPadding() + 24.dp,
-                bottom = floatingControlsPadding,
-            ),
+            contentPadding = PaddingValues(top = 0.dp, bottom = floatingControlsPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                NoteTopBar(
-                    isLocked = noteLocked,
-                    contentVisible = !contentHidden,
-                    onBack = { saveNote(navigateAfterSave = true, allowEmptyBack = true) },
-                    onShare = { shareCurrentNote(context, title, noteField.text, images.size, savedAudioMemos.size) },
-                    onFind = {
-                        focusManager.clearFocus()
-                        showFindInNote = true
-                    },
-                    onLock = { showLockDialog = true },
-                    onRemoveLock = {
-                        scope.launch {
-                            viewModel.removeNoteLock(conversationId)
-                                .onSuccess {
-                                    sessionUnlocked = false
-                                    savedNotice = "Lock removed"
-                                }
-                                .onFailure { error = it.message ?: "Could not remove lock." }
-                        }
-                    },
-                    onSave = { saveNote(navigateAfterSave = true) },
-                )
+                Spacer(Modifier.height(contentPadding.calculateTopPadding() + 96.dp))
                 if (contentHidden) {
                     LockedNoteContent(
                         title = conversation?.title.orEmpty(),
@@ -689,10 +705,7 @@ fun WriteNoteScreen(
                 Spacer(Modifier.height(18.dp))
                 BasicTextField(
                     value = title,
-                    onValueChange = {
-                        title = it
-                        error = ""
-                    },
+                    onValueChange = { updateEditState(nextTitle = it) },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.headlineMedium.copy(
                         color = MaterialTheme.colorScheme.onSurface,
@@ -720,10 +733,7 @@ fun WriteNoteScreen(
                 Spacer(Modifier.height(18.dp))
                 NoteDocumentEditor(
                     value = noteField,
-                    onValueChange = {
-                        noteField = it
-                        error = ""
-                    },
+                    onValueChange = { updateEditState(nextNote = it) },
                     memos = memos,
                     images = images,
                     activeInlineFormats = activeInlineFormatNames.mapNotNull { runCatching { NoteFormat.valueOf(it) }.getOrNull() }.toSet(),
@@ -746,6 +756,48 @@ fun WriteNoteScreen(
             }
         }
 
+        Surface(
+            color = MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
+            tonalElevation = 2.dp,
+            shadowElevation = 2.dp,
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            NoteTopBar(
+                isLocked = noteLocked,
+                contentVisible = !contentHidden,
+                canUndo = noteUndoStack.isNotEmpty(),
+                canRedo = noteRedoStack.isNotEmpty(),
+                onBack = { saveNote(navigateAfterSave = true, allowEmptyBack = true) },
+                onUndo = ::undoNoteEdit,
+                onRedo = ::redoNoteEdit,
+                onShare = { shareCurrentNote(context, title, noteField.text, images.size, savedAudioMemos.size) },
+                onFind = {
+                    focusManager.clearFocus()
+                    showFindInNote = true
+                },
+                onLock = { showLockDialog = true },
+                onRemoveLock = {
+                    scope.launch {
+                        viewModel.removeNoteLock(conversationId)
+                            .onSuccess {
+                                sessionUnlocked = false
+                                savedNotice = "Lock removed"
+                            }
+                            .onFailure { error = it.message ?: "Could not remove lock." }
+                    }
+                },
+                onSave = { saveNote(navigateAfterSave = true) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        top = contentPadding.calculateTopPadding() + 8.dp,
+                        start = 20.dp,
+                        end = 20.dp,
+                        bottom = 8.dp,
+                    ),
+            )
+        }
+
         if (!contentHidden && showFindInNote) {
             FindInNoteToolbar(
                 query = findQuery,
@@ -761,11 +813,13 @@ fun WriteNoteScreen(
                 onReplaceQueryChange = { replaceQuery = it },
                 onReplaceCurrent = {
                     findMatches.getOrNull(selectedFindIndex)?.let { match ->
-                        noteField = noteField.replaceTextRange(
-                            start = match.first,
-                            end = match.last + 1,
-                            replacement = replaceQuery,
-                            selectionStart = match.first + replaceQuery.length,
+                        updateEditState(
+                            nextNote = noteField.replaceTextRange(
+                                start = match.first,
+                                end = match.last + 1,
+                                replacement = replaceQuery,
+                                selectionStart = match.first + replaceQuery.length,
+                            ),
                         )
                     }
                 },
@@ -774,7 +828,7 @@ fun WriteNoteScreen(
                         val nextText = findMatches.asReversed().fold(noteField.text) { text, match ->
                             text.replaceRange(match.first, match.last + 1, replaceQuery)
                         }
-                        noteField = noteField.copy(text = nextText, selection = TextRange(nextText.length))
+                        updateEditState(nextNote = noteField.copy(text = nextText, selection = TextRange(nextText.length)))
                         selectedFindIndex = 0
                     }
                 },
@@ -3264,16 +3318,21 @@ private fun tableToken(cells: List<List<String>>): String {
 private fun NoteTopBar(
     isLocked: Boolean,
     contentVisible: Boolean,
+    canUndo: Boolean,
+    canRedo: Boolean,
     onBack: () -> Unit,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
     onShare: () -> Unit,
     onFind: () -> Unit,
     onLock: () -> Unit,
     onRemoveLock: () -> Unit,
     onSave: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var moreOpen by remember { mutableStateOf(false) }
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -3289,6 +3348,12 @@ private fun NoteTopBar(
         }
         Spacer(Modifier.weight(1f))
         if (contentVisible) {
+            IconButton(onClick = onUndo, enabled = canUndo) {
+                Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo edit")
+            }
+            IconButton(onClick = onRedo, enabled = canRedo) {
+                Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo edit")
+            }
             IconButton(onClick = onShare) {
                 Icon(Icons.Default.Share, contentDescription = "Share note")
             }
@@ -4803,6 +4868,11 @@ private data class KnotRingConfig(
     val registerType: String,
     val rotation: Float,
     val color: Color,
+)
+
+private data class NoteEditSnapshot(
+    val title: String,
+    val note: TextFieldValue,
 )
 
 private data class BorromeanWordColors(
