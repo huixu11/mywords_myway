@@ -1,6 +1,7 @@
 package com.mywordsmyway.data.repository
 
 import com.mywordsmyway.data.local.BorromeanKnotWithWords
+import com.mywordsmyway.data.local.BorromeanWordEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
 import com.mywordsmyway.data.local.NounWithLinksEntity
 import kotlinx.coroutines.flow.Flow
@@ -8,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 interface WordRepository {
     fun observeNouns(): Flow<List<NounWithLinksEntity>>
     fun observeBorromeanKnots(): Flow<List<BorromeanKnotWithWords>>
+    fun observeGlobalBorromeanWords(): Flow<List<BorromeanWordEntity>>
     fun observeSuggestions(conversationId: String): Flow<List<NounSuggestionEntity>>
     fun observePendingSuggestions(): Flow<List<NounSuggestionEntity>>
     suspend fun keepSuggestion(suggestionId: String)
@@ -22,7 +24,7 @@ interface WordRepository {
     suspend fun renameBorromeanKnot(knotId: String, title: String, description: String, personName: String? = null, theoryNote: String = "")
     suspend fun archiveBorromeanKnot(knotId: String)
     suspend fun addBorromeanWord(
-        knotId: String,
+        knotId: String?,
         text: String,
         registerType: String,
         objectPartType: String? = null,

@@ -138,7 +138,7 @@ private fun MyWordsApp(viewModel: MainViewModel) {
                     viewModel = viewModel,
                     contentPadding = padding,
                     onOpenNote = { conversationId -> navController.navigate("note/$conversationId?source=words") },
-                    onCreateLinkedNote = { _, wordId ->
+                    onCreateLinkedNote = { wordId ->
                         scope.launch {
                             viewModel.startNote()
                                 .onSuccess { conversationId ->

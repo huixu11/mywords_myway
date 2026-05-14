@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.mywordsmyway.data.local.BorromeanKnotWithWords
+import com.mywordsmyway.data.local.BorromeanWordEntity
 import com.mywordsmyway.data.local.ConversationEntity
 import com.mywordsmyway.data.local.ConversationSummaryEntity
 import com.mywordsmyway.data.local.NoteFolderWithCount
@@ -54,6 +55,9 @@ class MainViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val borromeanKnots: StateFlow<List<BorromeanKnotWithWords>> = wordRepository.observeBorromeanKnots()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val globalBorromeanWords: StateFlow<List<BorromeanWordEntity>> = wordRepository.observeGlobalBorromeanWords()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     var recordUiState by mutableStateOf(RecordUiState())
@@ -248,7 +252,7 @@ class MainViewModel(
     }
 
     suspend fun addBorromeanWord(
-        knotId: String,
+        knotId: String?,
         text: String,
         registerType: String,
         objectPartType: String? = null,

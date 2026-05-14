@@ -271,6 +271,12 @@ interface BorromeanDao {
     @Query("SELECT * FROM borromean_knots WHERE isArchived = 0 ORDER BY sortOrder ASC, updatedAt DESC")
     fun observeKnotsWithWords(): Flow<List<BorromeanKnotWithWords>>
 
+    @Query("SELECT * FROM borromean_words WHERE registerType IN ('affect', 'desire') AND knotId IS NULL ORDER BY updatedAt DESC, sortOrder ASC")
+    fun observeGlobalWords(): Flow<List<BorromeanWordEntity>>
+
+    @Query("SELECT * FROM borromean_words WHERE registerType IN ('affect', 'desire') AND knotId IS NULL ORDER BY updatedAt DESC, sortOrder ASC")
+    suspend fun getGlobalWords(): List<BorromeanWordEntity>
+
     @Transaction
     @Query("SELECT * FROM borromean_knots WHERE isArchived = 0 ORDER BY sortOrder ASC, updatedAt DESC")
     suspend fun getKnotsWithWords(): List<BorromeanKnotWithWords>
@@ -280,6 +286,9 @@ interface BorromeanDao {
 
     @Query("SELECT COUNT(*) FROM borromean_words WHERE knotId = :knotId AND registerType = :registerType")
     suspend fun countWords(knotId: String, registerType: String): Int
+
+    @Query("SELECT COUNT(*) FROM borromean_words WHERE knotId IS NULL AND registerType = :registerType")
+    suspend fun countGlobalWords(registerType: String): Int
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertKnot(knot: BorromeanKnotEntity)

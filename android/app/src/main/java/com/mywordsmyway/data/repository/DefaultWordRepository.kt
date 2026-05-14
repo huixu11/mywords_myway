@@ -32,6 +32,12 @@ class DefaultWordRepository(
             ensureStarterBorromeanKnots()
         }
 
+    override fun observeGlobalBorromeanWords(): Flow<List<BorromeanWordEntity>> =
+        borromeanDao.observeGlobalWords().onStart {
+            normalizeLegacyBorromeanWords()
+            ensureStarterBorromeanKnots()
+        }
+
     override fun observeSuggestions(conversationId: String): Flow<List<NounSuggestionEntity>> =
         nounDao.observeSuggestionsForConversation(conversationId)
 
@@ -150,7 +156,7 @@ class DefaultWordRepository(
     }
 
     override suspend fun addBorromeanWord(
-        knotId: String,
+        knotId: String?,
         text: String,
         registerType: String,
         objectPartType: String?,
@@ -176,7 +182,11 @@ class DefaultWordRepository(
                 conversationId = null,
                 createdAt = now,
                 updatedAt = now,
-                sortOrder = borromeanDao.countWords(knotId, cleanRegister),
+                sortOrder = if (knotId == null) {
+                    borromeanDao.countGlobalWords(cleanRegister)
+                } else {
+                    borromeanDao.countWords(knotId, cleanRegister)
+                },
             ),
         )
         return id

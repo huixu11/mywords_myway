@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SafetyEventEntity::class,
         PaymentEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 @TypeConverters(InstantConverters::class)
@@ -46,7 +46,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "my_words_my_way.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .build()
                     .also { instance = it }
             }
@@ -172,6 +172,68 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE borromean_words ADD COLUMN emotionalWeight INTEGER NOT NULL DEFAULT 50")
                 db.execSQL("ALTER TABLE borromean_words ADD COLUMN importanceWeight INTEGER NOT NULL DEFAULT 50")
                 db.execSQL("ALTER TABLE borromean_words ADD COLUMN desireWeight INTEGER NOT NULL DEFAULT 50")
+            }
+        }
+
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE borromean_words_new (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        knotId TEXT,
+                        text TEXT NOT NULL,
+                        registerType TEXT NOT NULL,
+                        objectPartType TEXT,
+                        emotionalWeight INTEGER NOT NULL,
+                        importanceWeight INTEGER NOT NULL,
+                        desireWeight INTEGER NOT NULL,
+                        conversationId TEXT,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        sortOrder INTEGER NOT NULL,
+                        FOREIGN KEY(knotId) REFERENCES borromean_knots(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(conversationId) REFERENCES conversations(id) ON UPDATE NO ACTION ON DELETE SET NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO borromean_words_new (
+                        id,
+                        knotId,
+                        text,
+                        registerType,
+                        objectPartType,
+                        emotionalWeight,
+                        importanceWeight,
+                        desireWeight,
+                        conversationId,
+                        createdAt,
+                        updatedAt,
+                        sortOrder
+                    )
+                    SELECT
+                        id,
+                        CASE WHEN registerType IN ('affect', 'desire') THEN NULL ELSE knotId END,
+                        text,
+                        registerType,
+                        objectPartType,
+                        emotionalWeight,
+                        importanceWeight,
+                        desireWeight,
+                        conversationId,
+                        createdAt,
+                        updatedAt,
+                        sortOrder
+                    FROM borromean_words
+                    """.trimIndent(),
+                )
+                db.execSQL("DROP TABLE borromean_words")
+                db.execSQL("ALTER TABLE borromean_words_new RENAME TO borromean_words")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_knotId ON borromean_words(knotId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_conversationId ON borromean_words(conversationId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_registerType ON borromean_words(registerType)")
             }
         }
     }

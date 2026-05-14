@@ -1083,9 +1083,10 @@ fun WordsScreen(
     viewModel: MainViewModel,
     contentPadding: PaddingValues,
     onOpenNote: (String) -> Unit,
-    onCreateLinkedNote: (String, String) -> Unit,
+    onCreateLinkedNote: (String) -> Unit,
 ) {
     val knots by viewModel.borromeanKnots.collectAsState()
+    val globalWords by viewModel.globalBorromeanWords.collectAsState()
     val scope = rememberCoroutineScope()
     var selectedKnotId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedRegister by rememberSaveable { mutableStateOf(BORROMEAN_REGISTER_REAL) }
@@ -1141,8 +1142,12 @@ fun WordsScreen(
         noteSearchQuery = ""
     }
     fun saveWord() {
-        val knotId = activeKnot?.knot?.id ?: return
         val register = addingRegister ?: BORROMEAN_REGISTER_OBJECT_A
+        val knotId = if (register == BORROMEAN_REGISTER_AFFECT || register == BORROMEAN_REGISTER_DESIRE) {
+            null
+        } else {
+            activeKnot?.knot?.id ?: return
+        }
         val savedText = wordText
         scope.launch {
             if (editingWord == null) {
@@ -1242,53 +1247,6 @@ fun WordsScreen(
                 onOpenNote = onOpenNote,
             )
             Spacer(Modifier.height(18.dp))
-            WeightedBorromeanWordSection(
-                viewModel = viewModel,
-                title = "Personally important words",
-                description = "These words are ordered by how important your mind currently feels they are. As you talk more, they may become less attached to emotional importance.",
-                words = activeKnot.words
-                    .filter { it.registerType == BORROMEAN_REGISTER_AFFECT }
-                    .sortedWith(compareByDescending<BorromeanWordEntity> { it.importanceWeight }.thenByDescending { it.emotionalWeight }),
-                primaryLabel = "Importance",
-                secondaryLabel = "Emotional attachment",
-                primaryValue = { it.importanceWeight },
-                secondaryValue = { it.emotionalWeight },
-                onAddWord = { openWordEditor(null, BORROMEAN_REGISTER_AFFECT) },
-                onEditWord = { openWordEditor(it, BORROMEAN_REGISTER_AFFECT) },
-                onDeleteWord = { word -> wordPendingDelete = word },
-                onConnectNote = { word -> openNoteConnector(word.id, word.text, word.conversationId) },
-                onOpenNote = onOpenNote,
-                onPrimaryChange = { word, value ->
-                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, word.emotionalWeight, value, word.desireWeight) }
-                },
-                onSecondaryChange = { word, value ->
-                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, value, word.importanceWeight, word.desireWeight) }
-                },
-            )
-            Spacer(Modifier.height(18.dp))
-            WeightedBorromeanWordSection(
-                viewModel = viewModel,
-                title = "What I truly want",
-                description = "These are words extracted from mother's words and remade as your own desire. You pursue them through your own words and power.",
-                words = activeKnot.words
-                    .filter { it.registerType == BORROMEAN_REGISTER_DESIRE }
-                    .sortedByDescending { it.desireWeight },
-                primaryLabel = "Desire",
-                secondaryLabel = "Importance",
-                primaryValue = { it.desireWeight },
-                secondaryValue = { it.importanceWeight },
-                onAddWord = { openWordEditor(null, BORROMEAN_REGISTER_DESIRE) },
-                onEditWord = { openWordEditor(it, BORROMEAN_REGISTER_DESIRE) },
-                onDeleteWord = { word -> wordPendingDelete = word },
-                onConnectNote = { word -> openNoteConnector(word.id, word.text, word.conversationId) },
-                onOpenNote = onOpenNote,
-                onPrimaryChange = { word, value ->
-                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, word.emotionalWeight, word.importanceWeight, value) }
-                },
-                onSecondaryChange = { word, value ->
-                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, word.emotionalWeight, value, word.desireWeight) }
-                },
-            )
             ErrorText(error)
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1312,6 +1270,56 @@ fun WordsScreen(
                     onClick = { selectKnot(knot.knot.id) },
                 )
             }
+        }
+        item {
+            Spacer(Modifier.height(18.dp))
+            WeightedBorromeanWordSection(
+                viewModel = viewModel,
+                title = "Personally important words",
+                description = "These words are ordered by how important your mind currently feels they are. They are global, not tied to a specific Borromean knot.",
+                words = globalWords
+                    .filter { it.registerType == BORROMEAN_REGISTER_AFFECT }
+                    .sortedWith(compareByDescending<BorromeanWordEntity> { it.importanceWeight }.thenByDescending { it.emotionalWeight }),
+                primaryLabel = "Importance",
+                secondaryLabel = "Emotional attachment",
+                primaryValue = { it.importanceWeight },
+                secondaryValue = { it.emotionalWeight },
+                onAddWord = { openWordEditor(null, BORROMEAN_REGISTER_AFFECT) },
+                onEditWord = { openWordEditor(it, BORROMEAN_REGISTER_AFFECT) },
+                onDeleteWord = { word -> wordPendingDelete = word },
+                onConnectNote = { word -> openNoteConnector(word.id, word.text, word.conversationId) },
+                onOpenNote = onOpenNote,
+                onPrimaryChange = { word, value ->
+                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, word.emotionalWeight, value, word.desireWeight) }
+                },
+                onSecondaryChange = { word, value ->
+                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, value, word.importanceWeight, word.desireWeight) }
+                },
+            )
+            Spacer(Modifier.height(18.dp))
+            WeightedBorromeanWordSection(
+                viewModel = viewModel,
+                title = "What I truly want",
+                description = "These words are extracted from mother's words and remade as your own desire. They are global, not tied to a specific Borromean knot.",
+                words = globalWords
+                    .filter { it.registerType == BORROMEAN_REGISTER_DESIRE }
+                    .sortedByDescending { it.desireWeight },
+                primaryLabel = "Desire",
+                secondaryLabel = "Importance",
+                primaryValue = { it.desireWeight },
+                secondaryValue = { it.importanceWeight },
+                onAddWord = { openWordEditor(null, BORROMEAN_REGISTER_DESIRE) },
+                onEditWord = { openWordEditor(it, BORROMEAN_REGISTER_DESIRE) },
+                onDeleteWord = { word -> wordPendingDelete = word },
+                onConnectNote = { word -> openNoteConnector(word.id, word.text, word.conversationId) },
+                onOpenNote = onOpenNote,
+                onPrimaryChange = { word, value ->
+                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, word.emotionalWeight, word.importanceWeight, value) }
+                },
+                onSecondaryChange = { word, value ->
+                    scope.launch { viewModel.updateBorromeanWordWeights(word.id, word.emotionalWeight, value, word.desireWeight) }
+                },
+            )
         }
     }
 
@@ -1339,8 +1347,7 @@ fun WordsScreen(
         )
     }
     val targetWordId = connectingWordId
-    val targetKnotId = activeKnot?.knot?.id
-    if (targetWordId != null && targetKnotId != null) {
+    if (targetWordId != null) {
         BorromeanNoteConnectionSheet(
             viewModel = viewModel,
             wordText = connectingWordText,
@@ -1361,7 +1368,7 @@ fun WordsScreen(
             },
             onCreateNew = {
                 closeNoteConnector()
-                onCreateLinkedNote(targetKnotId, targetWordId)
+                onCreateLinkedNote(targetWordId)
             },
         )
     }

@@ -63,6 +63,7 @@ class NotesExporter(
     suspend fun writeWordsExport(): TextExportFile = withContext(Dispatchers.IO) {
         val nouns = database.nounDao().getConfirmedNounNames()
         val knots = database.borromeanDao().getKnotsWithWords()
+        val globalWords = database.borromeanDao().getGlobalWords()
         val exportText = buildString {
             appendLine("My Words, My Way")
             appendLine("Words export")
@@ -79,20 +80,20 @@ class NotesExporter(
                     appendLine(knotWithWords.knot.description)
                 }
                 appendWordsSection("object a fragments", knotWithWords.words.filter { it.registerType == "object_a" })
-                appendWordsSection(
-                    "Personally important words",
-                    knotWithWords.words
-                        .filter { it.registerType == "affect" }
-                        .sortedWith(compareByDescending { it.importanceWeight }),
-                )
-                appendWordsSection(
-                    "What I truly want",
-                    knotWithWords.words
-                        .filter { it.registerType == "desire" }
-                        .sortedByDescending { it.desireWeight },
-                )
                 appendLine()
             }
+            appendWordsSection(
+                "Personally important words",
+                globalWords
+                    .filter { it.registerType == "affect" }
+                    .sortedWith(compareByDescending { it.importanceWeight }),
+            )
+            appendWordsSection(
+                "What I truly want",
+                globalWords
+                    .filter { it.registerType == "desire" }
+                    .sortedByDescending { it.desireWeight },
+            )
         }
         val outputDir = File(context.cacheDir, "exports").apply { mkdirs() }
         val outputFile = File(outputDir, "my_words_my_way_words.txt")

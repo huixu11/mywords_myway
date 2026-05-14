@@ -161,7 +161,7 @@ data class BorromeanKnotEntity(
 )
 data class BorromeanWordEntity(
     @PrimaryKey val id: String,
-    val knotId: String,
+    val knotId: String?,
     val text: String,
     val registerType: String,
     val objectPartType: String?,
