@@ -302,6 +302,10 @@ class MainViewModel(
         conversationRepository.deleteAllConversations()
     }
 
+    suspend fun deleteConversation(conversationId: String): Result<Unit> = runCatching {
+        conversationRepository.deleteConversation(conversationId)
+    }
+
     suspend fun deleteAllNouns(): Result<Unit> = runCatching {
         wordRepository.deleteAllNouns()
     }

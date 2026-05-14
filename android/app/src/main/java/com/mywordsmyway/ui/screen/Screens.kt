@@ -89,9 +89,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -296,7 +299,8 @@ fun RecordScreen(
 ) {
     val memos by viewModel.observeMemos(conversationId).collectAsState(initial = emptyList())
     val recordState = viewModel.recordUiState
-    val totalDuration = remember(memos) { memos.sumOf { it.durationMillis ?: 0L } }
+    val savedAudioMemos = remember(memos) { memos.filter { it.audioPath != null } }
+    val totalDuration = remember(savedAudioMemos) { savedAudioMemos.sumOf { it.durationMillis ?: 0L } }
     val nextRound = memos.size + 1
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -322,7 +326,7 @@ fun RecordScreen(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "${memos.size} memos saved - ${formatDuration(totalDuration)} recorded - 20-30 min recommended",
+                "${savedAudioMemos.size} saved audio ${if (savedAudioMemos.size == 1) "memo" else "memos"} - ${formatDuration(totalDuration)} recorded - 20-30 min recommended",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(18.dp))
@@ -424,7 +428,8 @@ fun WriteNoteScreen(
     val images by viewModel.observeNoteImages(conversationId).collectAsState(initial = emptyList())
     val memos by viewModel.observeMemos(conversationId).collectAsState(initial = emptyList())
     val recordState = viewModel.recordUiState
-    val totalDuration = remember(memos) { memos.sumOf { it.durationMillis ?: 0L } }
+    val savedAudioMemos = remember(memos) { memos.filter { it.audioPath != null } }
+    val totalDuration = remember(savedAudioMemos) { savedAudioMemos.sumOf { it.durationMillis ?: 0L } }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val deviceAuthAvailable = remember(context) { context.deviceAuthAvailable() }
@@ -624,7 +629,7 @@ fun WriteNoteScreen(
                     isLocked = noteLocked,
                     contentVisible = !contentHidden,
                     onBack = { saveNote(navigateAfterSave = true, allowEmptyBack = true) },
-                    onShare = { shareCurrentNote(context, title, noteField.text, images.size, memos.size) },
+                    onShare = { shareCurrentNote(context, title, noteField.text, images.size, savedAudioMemos.size) },
                     onFind = {
                         focusManager.clearFocus()
                         showFindInNote = true
@@ -827,7 +832,7 @@ fun WriteNoteScreen(
         } else if (!contentHidden) {
             FloatingRecorder(
                 recordState = recordState,
-                memoCount = memos.size,
+                memoCount = savedAudioMemos.size,
                 totalDuration = totalDuration,
                 hasRecordPermission = hasRecordPermission,
                 onRequestPermission = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
@@ -1043,6 +1048,8 @@ fun WordsScreen(
     var connectingWordText by rememberSaveable { mutableStateOf("") }
     var connectingConversationId by rememberSaveable { mutableStateOf<String?>(null) }
     var noteSearchQuery by rememberSaveable { mutableStateOf("") }
+    var knotPendingDelete by remember { mutableStateOf<BorromeanKnotWithWords?>(null) }
+    var wordPendingDelete by remember { mutableStateOf<BorromeanWordEntity?>(null) }
     var error by rememberSaveable { mutableStateOf("") }
     val activeKnot = remember(knots, selectedKnotId) {
         knots.firstOrNull { it.knot.id == selectedKnotId } ?: knots.firstOrNull()
@@ -1141,9 +1148,28 @@ fun WordsScreen(
             )
             Spacer(Modifier.height(18.dp))
             if (activeKnot == null) {
-                Text("Loading knots...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("No Borromean knots yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        scope.launch {
+                            viewModel.createBorromeanKnot(
+                                title = "New Borromean knot",
+                                description = "",
+                                theoryNote = "The knot can stretch or rotate, but the topology remains.",
+                            ).onSuccess { selectedKnotId = it }
+                                .onFailure { error = it.message ?: "Could not create knot." }
+                        }
+                    },
+                ) {
+                    Text("Create knot")
+                }
                 return@item
             }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(activeKnot.knot.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(12.dp))
             BorromeanObjectAHero(
                 viewModel = viewModel,
                 knot = activeKnot,
@@ -1157,6 +1183,7 @@ fun WordsScreen(
                 },
                 onEditWord = { word -> openWordEditor(word, BORROMEAN_REGISTER_OBJECT_A) },
                 onAddObjectWord = { openWordEditor(null, BORROMEAN_REGISTER_OBJECT_A) },
+                onDeleteObjectWord = { word -> wordPendingDelete = word },
                 onConnectWordNote = { word -> openNoteConnector(word.id, word.text, word.conversationId) },
                 onOpenNote = onOpenNote,
             )
@@ -1174,7 +1201,7 @@ fun WordsScreen(
                 secondaryValue = { it.emotionalWeight },
                 onAddWord = { openWordEditor(null, BORROMEAN_REGISTER_AFFECT) },
                 onEditWord = { openWordEditor(it, BORROMEAN_REGISTER_AFFECT) },
-                onDeleteWord = { word -> scope.launch { viewModel.deleteBorromeanWord(word.id) } },
+                onDeleteWord = { word -> wordPendingDelete = word },
                 onConnectNote = { word -> openNoteConnector(word.id, word.text, word.conversationId) },
                 onOpenNote = onOpenNote,
                 onPrimaryChange = { word, value ->
@@ -1198,7 +1225,7 @@ fun WordsScreen(
                 secondaryValue = { it.importanceWeight },
                 onAddWord = { openWordEditor(null, BORROMEAN_REGISTER_DESIRE) },
                 onEditWord = { openWordEditor(it, BORROMEAN_REGISTER_DESIRE) },
-                onDeleteWord = { word -> scope.launch { viewModel.deleteBorromeanWord(word.id) } },
+                onDeleteWord = { word -> wordPendingDelete = word },
                 onConnectNote = { word -> openNoteConnector(word.id, word.text, word.conversationId) },
                 onOpenNote = onOpenNote,
                 onPrimaryChange = { word, value ->
@@ -1221,7 +1248,16 @@ fun WordsScreen(
             Spacer(Modifier.height(8.dp))
         }
         items(knots.filter { it.knot.id != activeKnot?.knot?.id }, key = { it.knot.id }) { knot ->
-            ObjectAKnotCard(knot = knot, onClick = { selectKnot(knot.knot.id) })
+            SwipeToDeleteRow(
+                contentDescription = "Delete knot",
+                shape = RoundedCornerShape(20.dp),
+                onDelete = { knotPendingDelete = knot },
+            ) {
+                ObjectAKnotCard(
+                    knot = knot,
+                    onClick = { selectKnot(knot.knot.id) },
+                )
+            }
         }
     }
 
@@ -1275,6 +1311,38 @@ fun WordsScreen(
             },
         )
     }
+    knotPendingDelete?.let { knot ->
+        DeleteKnotConfirmationDialog(
+            knot = knot,
+            onDismiss = { knotPendingDelete = null },
+            onDelete = {
+                scope.launch {
+                    viewModel.archiveBorromeanKnot(knot.knot.id)
+                        .onSuccess {
+                            knotPendingDelete = null
+                            if (selectedKnotId == knot.knot.id) {
+                                selectedKnotId = null
+                                selectedRegister = BORROMEAN_REGISTER_REAL
+                            }
+                        }
+                        .onFailure { error = it.message ?: "Could not delete knot." }
+                }
+            },
+        )
+    }
+    wordPendingDelete?.let { word ->
+        DeleteWordConfirmationDialog(
+            word = word,
+            onDismiss = { wordPendingDelete = null },
+            onDelete = {
+                scope.launch {
+                    viewModel.deleteBorromeanWord(word.id)
+                        .onSuccess { wordPendingDelete = null }
+                        .onFailure { error = it.message ?: "Could not delete word." }
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -1297,6 +1365,7 @@ fun NotesScreen(
     val notes by notesFlow.collectAsState(initial = emptyList())
     val searchResults = remember(notes, query) { rankedNoteSearchResults(notes, query) }
     val topHits = remember(searchResults, query) { if (query.isBlank()) emptyList() else searchResults.take(3) }
+    var notePendingDelete by remember { mutableStateOf<ConversationEntity?>(null) }
     fun createNoteInCurrentFolder() {
         scope.launch {
             viewModel.startNote(selectedFolderId)
@@ -1341,12 +1410,22 @@ fun NotesScreen(
                 if (topHits.isNotEmpty()) {
                     item { Text("Top Hits", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
                     items(topHits, key = { "hit-${it.note.id}" }) { result ->
-                        NoteSearchResultRow(result = result, onClick = { onEditNote(result.note.id) })
+                        SwipeToDeleteRow(contentDescription = "Delete note", onDelete = { notePendingDelete = result.note }) {
+                            NoteSearchResultRow(
+                                result = result,
+                                onClick = { onEditNote(result.note.id) },
+                            )
+                        }
                     }
                 }
                 item { Text("Results", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
                 items(searchResults, key = { it.note.id }) { result ->
-                    NoteSearchResultRow(result = result, onClick = { onEditNote(result.note.id) })
+                    SwipeToDeleteRow(contentDescription = "Delete note", onDelete = { notePendingDelete = result.note }) {
+                        NoteSearchResultRow(
+                            result = result,
+                            onClick = { onEditNote(result.note.id) },
+                        )
+                    }
                 }
             } else if (selectedFolder == null) {
                 items(folders, key = { it.folder.id }) { folder ->
@@ -1359,12 +1438,14 @@ fun NotesScreen(
                 items(notes, key = { it.id }) { note ->
                     val noteImages by viewModel.observeNoteImages(note.id).collectAsState(initial = emptyList())
                     val noteMemos by viewModel.observeMemos(note.id).collectAsState(initial = emptyList())
-                    NoteRow(
-                        note = note,
-                        images = noteImages,
-                        memoCount = noteMemos.size,
-                        onClick = { onEditNote(note.id) },
-                    )
+                    SwipeToDeleteRow(contentDescription = "Delete note", onDelete = { notePendingDelete = note }) {
+                        NoteRow(
+                            note = note,
+                            images = noteImages,
+                            memoCount = noteMemos.count { it.audioPath != null },
+                            onClick = { onEditNote(note.id) },
+                        )
+                    }
                 }
             }
         }
@@ -1382,6 +1463,20 @@ fun NotesScreen(
         )
     }
 
+    notePendingDelete?.let { note ->
+        DeleteNoteConfirmationDialog(
+            note = note,
+            onDismiss = { notePendingDelete = null },
+            onDelete = {
+                scope.launch {
+                    viewModel.deleteConversation(note.id)
+                        .onSuccess { notePendingDelete = null }
+                        .onFailure { createError = it.message ?: "Could not delete note." }
+                }
+            },
+        )
+    }
+
 }
 
 @Composable
@@ -1395,6 +1490,7 @@ private fun BorromeanObjectAHero(
     onKnotTransform: (Float, Float) -> Unit,
     onEditWord: (BorromeanWordEntity) -> Unit,
     onAddObjectWord: () -> Unit,
+    onDeleteObjectWord: (BorromeanWordEntity) -> Unit,
     onConnectWordNote: (BorromeanWordEntity) -> Unit,
     onOpenNote: (String) -> Unit,
 ) {
@@ -1470,25 +1566,32 @@ private fun BorromeanObjectAHero(
                     objectGroups.forEach { (type, words) ->
                         Text(objectPartLabel(type), color = Color.White.copy(alpha = 0.58f), style = MaterialTheme.typography.labelSmall)
                         words.forEach { word ->
-                            Surface(
-                                onClick = { onEditWord(word) },
+                            val colors = borromeanWordColors(word)
+                            SwipeToDeleteRow(
+                                contentDescription = "Delete word",
                                 shape = RoundedCornerShape(16.dp),
-                                color = Color.White.copy(alpha = 0.13f),
-                                contentColor = Color.White,
-                                modifier = Modifier.fillMaxWidth(),
+                                onDelete = { onDeleteObjectWord(word) },
                             ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                Surface(
+                                    onClick = { onEditWord(word) },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = colors.container,
+                                    contentColor = colors.content,
+                                    modifier = Modifier.fillMaxWidth(),
                                 ) {
-                                    Text(word.text, fontWeight = FontWeight.Medium)
-                                    BorromeanWordNoteChip(
-                                        viewModel = viewModel,
-                                        word = word,
-                                        onConnectNote = { onConnectWordNote(word) },
-                                        onOpenNote = onOpenNote,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Text(word.text, fontWeight = FontWeight.Medium)
+                                        BorromeanWordNoteChip(
+                                            viewModel = viewModel,
+                                            word = word,
+                                            onConnectNote = { onConnectWordNote(word) },
+                                            onOpenNote = onOpenNote,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1726,20 +1829,25 @@ private fun WeightedBorromeanWordSection(
                 Text("No words yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 words.forEach { word ->
-                    WeightedBorromeanWordRow(
-                        viewModel = viewModel,
-                        word = word,
-                        primaryLabel = primaryLabel,
-                        secondaryLabel = secondaryLabel,
-                        primaryValue = primaryValue(word),
-                        secondaryValue = secondaryValue(word),
-                        onEdit = { onEditWord(word) },
+                    SwipeToDeleteRow(
+                        contentDescription = "Delete word",
+                        shape = RoundedCornerShape(18.dp),
                         onDelete = { onDeleteWord(word) },
-                        onConnectNote = { onConnectNote(word) },
-                        onOpenNote = onOpenNote,
-                        onPrimaryChange = { onPrimaryChange(word, it) },
-                        onSecondaryChange = { onSecondaryChange(word, it) },
-                    )
+                    ) {
+                        WeightedBorromeanWordRow(
+                            viewModel = viewModel,
+                            word = word,
+                            primaryLabel = primaryLabel,
+                            secondaryLabel = secondaryLabel,
+                            primaryValue = primaryValue(word),
+                            secondaryValue = secondaryValue(word),
+                            onEdit = { onEditWord(word) },
+                            onConnectNote = { onConnectNote(word) },
+                            onOpenNote = onOpenNote,
+                            onPrimaryChange = { onPrimaryChange(word, it) },
+                            onSecondaryChange = { onSecondaryChange(word, it) },
+                        )
+                    }
                 }
             }
         }
@@ -1755,21 +1863,23 @@ private fun WeightedBorromeanWordRow(
     primaryValue: Int,
     secondaryValue: Int,
     onEdit: () -> Unit,
-    onDelete: () -> Unit,
     onConnectNote: () -> Unit,
     onOpenNote: (String) -> Unit,
     onPrimaryChange: (Int) -> Unit,
     onSecondaryChange: (Int) -> Unit,
 ) {
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)) {
+    val colors = borromeanWordColors(word)
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = colors.container,
+        contentColor = colors.content,
+        border = BorderStroke(1.dp, colors.accent.copy(alpha = 0.42f)),
+    ) {
         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(word.text, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
                 IconButton(onClick = onEdit) {
                     Icon(Icons.Default.Edit, contentDescription = "Edit word")
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete word")
                 }
             }
             BorromeanWordNoteChip(
@@ -1789,10 +1899,16 @@ private fun WeightedBorromeanWordRow(
 private fun WeightStepper(label: String, value: Int, onChange: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("$label $value", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(onClick = { onChange((value - 5).coerceIn(0, 100)) }) {
+        OutlinedButton(
+            onClick = { onChange((value - 5).coerceIn(0, 100)) },
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.36f)),
+        ) {
             Text("-")
         }
-        OutlinedButton(onClick = { onChange((value + 5).coerceIn(0, 100)) }) {
+        OutlinedButton(
+            onClick = { onChange((value + 5).coerceIn(0, 100)) },
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.36f)),
+        ) {
             Text("+")
         }
     }
@@ -1808,10 +1924,23 @@ private fun BorromeanWordNoteChip(
 ) {
     val conversationId = word.conversationId
     if (conversationId == null) {
-        OutlinedButton(onClick = onConnectNote, modifier = modifier) {
-            Text("Connect note")
+        val colors = borromeanWordColors(word)
+        Surface(
+            onClick = onConnectNote,
+            modifier = modifier,
+            shape = RoundedCornerShape(50),
+            color = colors.chipContainer,
+            contentColor = colors.chipContent,
+            border = BorderStroke(1.dp, colors.accent.copy(alpha = 0.46f)),
+        ) {
+            Text(
+                "Connect note",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                fontWeight = FontWeight.Medium,
+            )
         }
     } else {
+        val colors = borromeanWordColors(word)
         val note by viewModel.observeConversation(conversationId).collectAsState(initial = null)
         val label = remember(note) {
             note?.let { linkedNote ->
@@ -1823,8 +1952,9 @@ private fun BorromeanWordNoteChip(
         Surface(
             modifier = modifier,
             shape = RoundedCornerShape(50),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            color = colors.chipContainer,
+            contentColor = colors.chipContent,
+            border = BorderStroke(1.dp, colors.accent.copy(alpha = 0.46f)),
         ) {
             Row(
                 modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
@@ -1931,7 +2061,10 @@ private fun NoteConnectionResultRow(
 }
 
 @Composable
-private fun ObjectAKnotCard(knot: BorromeanKnotWithWords, onClick: () -> Unit) {
+private fun ObjectAKnotCard(
+    knot: BorromeanKnotWithWords,
+    onClick: () -> Unit,
+) {
     val objectWords = knot.words
         .filter { it.registerType == BORROMEAN_REGISTER_OBJECT_A }
         .map { it.text }
@@ -2151,6 +2284,41 @@ private fun NotesBottomSearchBar(
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeToDeleteRow(
+    contentDescription: String,
+    shape: RoundedCornerShape = RoundedCornerShape(8.dp),
+    onDelete: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDelete()
+            }
+            false
+        },
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true,
+        backgroundContent = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.error, shape)
+                    .padding(horizontal = 20.dp),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = contentDescription, tint = MaterialTheme.colorScheme.onError)
+            }
+        },
+        content = { content() },
+    )
 }
 
 @Composable
@@ -4526,6 +4694,90 @@ private fun DeleteAudioConfirmationDialog(
 }
 
 @Composable
+private fun DeleteNoteConfirmationDialog(
+    note: ConversationEntity,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete this note?") },
+        text = {
+            Text(
+                "This deletes \"${note.title.ifBlank { "Untitled note" }}\" and its attachments. Notes are precious, so delete one at a time.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDelete) {
+                Text("Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DeleteKnotConfirmationDialog(
+    knot: BorromeanKnotWithWords,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete this Borromean knot?") },
+        text = {
+            Text(
+                "This deletes \"${knot.knot.title}\" from the Words page. Linked notes are kept.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDelete) {
+                Text("Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DeleteWordConfirmationDialog(
+    word: BorromeanWordEntity,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete this word?") },
+        text = {
+            Text(
+                "This deletes \"${word.text}\" from the Words page. Words are important, so delete one at a time. Linked notes are kept.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDelete) {
+                Text("Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
 private fun ErrorText(message: String) {
     if (message.isNotBlank()) {
         Spacer(Modifier.height(8.dp))
@@ -4551,6 +4803,14 @@ private data class KnotRingConfig(
     val registerType: String,
     val rotation: Float,
     val color: Color,
+)
+
+private data class BorromeanWordColors(
+    val container: Color,
+    val content: Color,
+    val accent: Color,
+    val chipContainer: Color,
+    val chipContent: Color,
 )
 
 private const val BORROMEAN_REGISTER_OBJECT_A = "object_a"
@@ -4598,6 +4858,57 @@ private fun borromeanRegisterColor(registerType: String): Color =
         BORROMEAN_REGISTER_DESIRE -> Color(0xFF8AE66E)
         else -> Color(0xFFFFFFFF)
     }
+
+private fun borromeanWordColors(word: BorromeanWordEntity): BorromeanWordColors {
+    val accent = when (word.registerType) {
+        BORROMEAN_REGISTER_OBJECT_A -> when (word.objectPartType?.lowercase(Locale.getDefault())) {
+            "gaze" -> Color(0xFFB8C7FF)
+            "voice" -> Color(0xFFC9B6FF)
+            "breast", "body" -> Color(0xFFFFB8C8)
+            "excrement", "gift", "control" -> Color(0xFFFFD7A8)
+            else -> Color(0xFFE4C6FF)
+        }
+        BORROMEAN_REGISTER_AFFECT -> Color(0xFFFFB36B)
+        BORROMEAN_REGISTER_DESIRE -> Color(0xFFA9E7A3)
+        else -> borromeanRegisterColor(word.registerType)
+    }
+    val container = when (word.registerType) {
+        BORROMEAN_REGISTER_OBJECT_A -> blendWithDarkSurface(accent, 0.32f)
+        BORROMEAN_REGISTER_AFFECT -> Color(0xFFFFF1E2)
+        BORROMEAN_REGISTER_DESIRE -> Color(0xFFEAF8E6)
+        else -> accent.copy(alpha = 0.16f)
+    }
+    val content = when (word.registerType) {
+        BORROMEAN_REGISTER_OBJECT_A -> Color.White
+        BORROMEAN_REGISTER_AFFECT -> Color(0xFF3F2410)
+        BORROMEAN_REGISTER_DESIRE -> Color(0xFF163917)
+        else -> Color(0xFF1F1B24)
+    }
+    val chipContainer = when (word.registerType) {
+        BORROMEAN_REGISTER_OBJECT_A -> blendWithDarkSurface(accent, 0.52f)
+        BORROMEAN_REGISTER_AFFECT -> Color(0xFFFFE0BC)
+        BORROMEAN_REGISTER_DESIRE -> Color(0xFFD0F0CC)
+        else -> accent.copy(alpha = 0.24f)
+    }
+    return BorromeanWordColors(
+        container = container,
+        content = content,
+        accent = accent,
+        chipContainer = chipContainer,
+        chipContent = content,
+    )
+}
+
+private fun blendWithDarkSurface(color: Color, amount: Float): Color {
+    val base = Color(0xFF171326)
+    val clampedAmount = amount.coerceIn(0f, 1f)
+    return Color(
+        red = base.red + (color.red - base.red) * clampedAmount,
+        green = base.green + (color.green - base.green) * clampedAmount,
+        blue = base.blue + (color.blue - base.blue) * clampedAmount,
+        alpha = 1f,
+    )
+}
 
 private fun objectPartLabel(type: String): String =
     when (type.lowercase(Locale.getDefault())) {

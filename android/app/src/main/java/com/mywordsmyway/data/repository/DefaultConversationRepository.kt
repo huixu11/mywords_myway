@@ -436,6 +436,11 @@ class DefaultConversationRepository(
         title.trim().ifEmpty { note.lineSequence().firstOrNull().orEmpty().take(60) }
 
     override suspend fun deleteConversation(conversationId: String) {
+        memoDao.getMemosForConversation(conversationId).forEach { memo ->
+            if (memo.audioPath != null) {
+                storageRepository.deleteMemoAudio(memo.id)
+            }
+        }
         noteImageDao.getImagesForConversation(conversationId).forEach { deleteNoteImageFile(it.imagePath) }
         conversationDao.deleteConversation(conversationId)
     }

@@ -149,6 +149,9 @@ interface VoiceMemoDao {
     @Query("SELECT * FROM voice_memos WHERE conversationId = :conversationId ORDER BY createdAt ASC")
     fun observeMemosForConversation(conversationId: String): Flow<List<VoiceMemoEntity>>
 
+    @Query("SELECT * FROM voice_memos WHERE conversationId = :conversationId ORDER BY createdAt ASC")
+    suspend fun getMemosForConversation(conversationId: String): List<VoiceMemoEntity>
+
     @Query("SELECT COUNT(*) FROM voice_memos WHERE conversationId = :conversationId")
     suspend fun countForConversation(conversationId: String): Int
 
