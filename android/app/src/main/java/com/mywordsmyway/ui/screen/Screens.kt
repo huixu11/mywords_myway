@@ -1228,6 +1228,12 @@ fun WordsScreen(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text(activeKnot.knot.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "A Borromean knot has generated because the person has something that lets you have familiar feelings that you had when you were little with your mom.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
             Spacer(Modifier.height(12.dp))
             BorromeanObjectAHero(
                 viewModel = viewModel,
@@ -1276,7 +1282,7 @@ fun WordsScreen(
             WeightedBorromeanWordSection(
                 viewModel = viewModel,
                 title = "Personally important words",
-                description = "These words are ordered by how important your mind currently feels they are. They are global, not tied to a specific Borromean knot.",
+                description = "These words are important because they come from our mom, also because we love our mom. We want to help you neutralize these words, so that they will not restrict you from seeing the whole picture of what happened to you, so that you can live freely and can follow your heart, because your words have power.",
                 words = globalWords
                     .filter { it.registerType == BORROMEAN_REGISTER_AFFECT }
                     .sortedWith(compareByDescending<BorromeanWordEntity> { it.importanceWeight }.thenByDescending { it.emotionalWeight }),
@@ -1300,7 +1306,7 @@ fun WordsScreen(
             WeightedBorromeanWordSection(
                 viewModel = viewModel,
                 title = "What I truly want",
-                description = "These words are extracted from mother's words and remade as your own desire. They are global, not tied to a specific Borromean knot.",
+                description = "These words are important because they come from our mom, also because we love our mom. Our words have power, so use them wisely.",
                 words = globalWords
                     .filter { it.registerType == BORROMEAN_REGISTER_DESIRE }
                     .sortedByDescending { it.desireWeight },
@@ -1625,7 +1631,9 @@ private fun BorromeanObjectAHero(
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                     objectGroups.forEach { (type, words) ->
-                        Text(objectPartLabel(type), color = Color.White.copy(alpha = 0.58f), style = MaterialTheme.typography.labelSmall)
+                        if (type != "other") {
+                            Text(objectPartLabel(type), color = Color.White.copy(alpha = 0.58f), style = MaterialTheme.typography.labelSmall)
+                        }
                         words.forEach { word ->
                             val colors = borromeanWordColors(word)
                             SwipeToDeleteRow(
@@ -1675,11 +1683,6 @@ private fun ObjectACentralHoleStatement() {
             Text("object a is the central hole", fontWeight = FontWeight.SemiBold)
             Text(
                 "The knot is organized around this hole. You can fill it with imaginary words, but it will never be that object, because object a is the missing place itself.",
-                color = Color.White.copy(alpha = 0.72f),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                "The center words are triggers or fragments of object a: gaze, voice, breast, excrement, and other words you place into the hole.",
                 color = Color.White.copy(alpha = 0.72f),
                 style = MaterialTheme.typography.bodySmall,
             )
