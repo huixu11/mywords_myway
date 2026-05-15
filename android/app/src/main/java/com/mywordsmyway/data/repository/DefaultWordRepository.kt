@@ -9,6 +9,7 @@ import com.mywordsmyway.data.local.NounEntity
 import com.mywordsmyway.data.local.NounLinkEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
 import com.mywordsmyway.data.local.NounWithLinksEntity
+import com.mywordsmyway.data.model.BorromeanWordCandidate
 import com.mywordsmyway.storage.plainNoteText
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onStart
@@ -187,6 +188,11 @@ class DefaultWordRepository(
                 } else {
                     borromeanDao.countWords(knotId, cleanRegister)
                 },
+                source = "manual",
+                sourceConversationId = null,
+                sourceMemoId = null,
+                extractionEvidence = null,
+                extractedAt = null,
             ),
         )
         return id
@@ -237,6 +243,53 @@ class DefaultWordRepository(
         borromeanDao.linkWordToConversation(wordId, conversationId, clock.instant())
     }
 
+    override suspend fun saveExtractedBorromeanWords(
+        conversationId: String,
+        objectKnotId: String?,
+        candidates: List<BorromeanWordCandidate>,
+    ): Int {
+        val now = clock.instant()
+        var inserted = 0
+        database.withTransaction {
+            candidates.forEach { candidate ->
+                val register = runCatching { requireValidBorromeanRegister(candidate.registerType) }.getOrNull() ?: return@forEach
+                val text = candidate.text.trim()
+                if (text.isBlank()) return@forEach
+                val knotId = if (register == "object_a") objectKnotId else null
+                if (register == "object_a" && knotId == null) return@forEach
+                val existing = borromeanDao.findWordByTextAndRegister(text, register, knotId)
+                if (existing != null) return@forEach
+                borromeanDao.insertWord(
+                    BorromeanWordEntity(
+                        id = UUID.randomUUID().toString(),
+                        knotId = knotId,
+                        text = text,
+                        registerType = register,
+                        objectPartType = candidate.objectPartType?.trim()?.lowercase()?.takeIf { it.isNotEmpty() },
+                        emotionalWeight = candidate.emotionalWeight.coerceIn(0, 100),
+                        importanceWeight = candidate.importanceWeight.coerceIn(0, 100),
+                        desireWeight = candidate.desireWeight.coerceIn(0, 100),
+                        conversationId = conversationId,
+                        createdAt = now,
+                        updatedAt = now,
+                        sortOrder = if (knotId == null) {
+                            borromeanDao.countGlobalWords(register)
+                        } else {
+                            borromeanDao.countWords(knotId, register)
+                        },
+                        source = "gemma",
+                        sourceConversationId = conversationId,
+                        sourceMemoId = candidate.sourceMemoId,
+                        extractionEvidence = candidate.evidence.takeIf { it.isNotBlank() },
+                        extractedAt = now,
+                    ),
+                )
+                inserted += 1
+            }
+        }
+        return inserted
+    }
+
     private suspend fun ensureStarterBorromeanKnots() {
         if (borromeanDao.countKnots() > 0) return
         database.withTransaction {
@@ -272,6 +325,11 @@ class DefaultWordRepository(
                             createdAt = now,
                             updatedAt = now,
                             sortOrder = wordIndex,
+                            source = "manual",
+                            sourceConversationId = null,
+                            sourceMemoId = null,
+                            extractionEvidence = null,
+                            extractedAt = null,
                         ),
                     )
                 }

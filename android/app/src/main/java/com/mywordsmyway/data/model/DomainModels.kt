@@ -45,6 +45,22 @@ data class NounExtractionResult(
     val candidateNouns: List<NounCandidate>,
 )
 
+data class BorromeanWordCandidate(
+    val text: String,
+    val registerType: String,
+    val objectPartType: String? = null,
+    val emotionalWeight: Int = 50,
+    val importanceWeight: Int = 50,
+    val desireWeight: Int = 50,
+    val evidence: String = "",
+    val confidence: String = "low",
+    val sourceMemoId: String? = null,
+)
+
+data class BorromeanExtractionResult(
+    val candidateWords: List<BorromeanWordCandidate>,
+)
+
 data class StorageUsage(
     val usedBytes: Long,
     val limitBytes: Long,

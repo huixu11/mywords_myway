@@ -45,6 +45,7 @@ interface ConversationRepository {
     suspend fun deleteNoteImage(imageId: String)
     suspend fun updateNote(conversationId: String, title: String, finalNote: String)
     suspend fun finishConversation(conversationId: String, title: String, finalNote: String): List<NounSuggestionEntity>
+    suspend fun buildGemmaExtractionSource(conversationId: String, noteText: String): String
     suspend fun deleteConversation(conversationId: String)
     suspend fun deleteAllConversations()
 }

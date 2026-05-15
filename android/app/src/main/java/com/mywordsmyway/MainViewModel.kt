@@ -22,13 +22,20 @@ import com.mywordsmyway.data.model.WeeklyAccess
 import com.mywordsmyway.data.repository.ConversationRepository
 import com.mywordsmyway.data.repository.StorageRepository
 import com.mywordsmyway.data.repository.WordRepository
+import com.mywordsmyway.model.ModelService
+import com.mywordsmyway.model.GemmaModelDownloadProgress
+import com.mywordsmyway.model.ModelSettings
+import com.mywordsmyway.model.ModelSettingsRepository
 import com.mywordsmyway.recorder.AndroidAudioRecorder
 import com.mywordsmyway.storage.NotesExporter
 import com.mywordsmyway.storage.TextExportFile
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 data class RecordUiState(
     val isRecording: Boolean = false,
@@ -44,6 +51,8 @@ class MainViewModel(
     private val storageRepository: StorageRepository,
     private val audioRecorder: AndroidAudioRecorder,
     private val notesExporter: NotesExporter,
+    private val modelService: ModelService,
+    private val modelSettingsRepository: ModelSettingsRepository,
 ) : ViewModel() {
     val weeklyAccess: StateFlow<WeeklyAccess> = conversationRepository.observeWeeklyAccess()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WeeklyAccess(true))
@@ -60,8 +69,13 @@ class MainViewModel(
     val globalBorromeanWords: StateFlow<List<BorromeanWordEntity>> = wordRepository.observeGlobalBorromeanWords()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val modelSettings: StateFlow<ModelSettings> = modelSettingsRepository.settings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ModelSettings())
+
     var recordUiState by mutableStateOf(RecordUiState())
         private set
+
+    val gemmaDownloadProgress = MutableStateFlow(GemmaModelDownloadProgress.Idle)
 
     fun observeCurrentConversation(): Flow<ConversationEntity?> =
         conversationRepository.observeCurrentConversation()
@@ -227,6 +241,36 @@ class MainViewModel(
         conversationRepository.finishConversation(conversationId, title, note).size
     }
 
+    suspend fun setGemmaModelPath(path: String): Result<Unit> = runCatching {
+        modelSettingsRepository.setGemmaModelPath(path)
+    }
+
+    suspend fun importGemmaModel(sourceUri: Uri): Result<String> = runCatching {
+        modelSettingsRepository.importGemmaModel(sourceUri)
+    }
+
+    suspend fun startGemmaModelDownload(): Result<Unit> = runCatching {
+        val downloadId = modelSettingsRepository.startGemmaModelDownload()
+        viewModelScope.launch {
+            modelSettingsRepository.observeGemmaModelDownload(downloadId).collectLatest { progress ->
+                gemmaDownloadProgress.value = progress
+            }
+        }
+    }
+
+    suspend fun gemmaModelStatus(): Result<String> = runCatching {
+        modelService.modelStatus()
+    }
+
+    suspend fun extractBorromeanWords(conversationId: String, noteText: String, objectKnotId: String?): Result<Int> = runCatching {
+        val source = conversationRepository.buildGemmaExtractionSource(conversationId, noteText)
+        if (source.isBlank()) return@runCatching 0
+        val existingWords = borromeanKnots.value.flatMap { knot -> knot.words.map { it.text } } +
+            globalBorromeanWords.value.map { it.text }
+        val result = modelService.extractBorromeanWords(source, existingWords)
+        wordRepository.saveExtractedBorromeanWords(conversationId, objectKnotId, result.candidateWords)
+    }
+
     suspend fun keepSuggestion(suggestionId: String): Result<Unit> = runCatching {
         wordRepository.keepSuggestion(suggestionId)
     }
@@ -343,6 +387,8 @@ class MainViewModel(
                 storageRepository = container.storageRepository,
                 audioRecorder = container.audioRecorder,
                 notesExporter = container.notesExporter,
+                modelService = container.modelService,
+                modelSettingsRepository = container.modelSettingsRepository,
             ) as T
         }
     }

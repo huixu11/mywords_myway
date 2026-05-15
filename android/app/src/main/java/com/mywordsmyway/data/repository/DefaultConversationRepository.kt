@@ -399,6 +399,24 @@ class DefaultConversationRepository(
         return suggestions
     }
 
+    override suspend fun buildGemmaExtractionSource(conversationId: String, noteText: String): String = withContext(Dispatchers.IO) {
+        val visibleNote = plainNoteText(noteText)
+        val memos = memoDao.getMemosForConversation(conversationId)
+        val transcripts = memos.mapNotNull { memo ->
+            val existingTranscript = memo.transcript?.takeIf { it.isNotBlank() }
+            val transcript = existingTranscript ?: memo.audioPath?.let { audioPath ->
+                runCatching { modelService.transcribe(audioPath) }.getOrNull()
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                    ?.also { memoDao.updateMemoTranscript(memo.id, it) }
+            }
+            transcript?.let { "Memo ${memos.indexOf(memo) + 1}: $it" }
+        }
+        listOf(visibleNote.takeIf { it.isNotBlank() }, transcripts.joinToString("\n").takeIf { it.isNotBlank() })
+            .filterNotNull()
+            .joinToString("\n\n")
+    }
+
     private suspend fun safetyForMemo(audioPath: String?, textFallback: String?): SafetyResult =
         runCatching {
             val sourceText = when {

@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SafetyEventEntity::class,
         PaymentEntity::class,
     ],
-    version = 7,
+    version = 9,
     exportSchema = false,
 )
 @TypeConverters(InstantConverters::class)
@@ -46,7 +46,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "my_words_my_way.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .build()
                     .also { instance = it }
             }
@@ -235,6 +235,94 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_conversationId ON borromean_words(conversationId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_registerType ON borromean_words(registerType)")
             }
+        }
+
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                recreateBorromeanWordsForGemma(db, sourceColumnsExist = false)
+            }
+        }
+
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                recreateBorromeanWordsForGemma(db, sourceColumnsExist = true)
+            }
+        }
+
+        private fun recreateBorromeanWordsForGemma(db: SupportSQLiteDatabase, sourceColumnsExist: Boolean) {
+            db.execSQL(
+                """
+                CREATE TABLE borromean_words_new (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    knotId TEXT,
+                    text TEXT NOT NULL,
+                    registerType TEXT NOT NULL,
+                    objectPartType TEXT,
+                    emotionalWeight INTEGER NOT NULL,
+                    importanceWeight INTEGER NOT NULL,
+                    desireWeight INTEGER NOT NULL,
+                    conversationId TEXT,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    sortOrder INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    sourceConversationId TEXT,
+                    sourceMemoId TEXT,
+                    extractionEvidence TEXT,
+                    extractedAt INTEGER,
+                    FOREIGN KEY(knotId) REFERENCES borromean_knots(id) ON UPDATE NO ACTION ON DELETE CASCADE,
+                    FOREIGN KEY(conversationId) REFERENCES conversations(id) ON UPDATE NO ACTION ON DELETE SET NULL
+                )
+                """.trimIndent(),
+            )
+            val sourceSelect = if (sourceColumnsExist) {
+                "source, sourceConversationId, sourceMemoId, extractionEvidence, extractedAt"
+            } else {
+                "'manual' AS source, NULL AS sourceConversationId, NULL AS sourceMemoId, NULL AS extractionEvidence, NULL AS extractedAt"
+            }
+            db.execSQL(
+                """
+                INSERT INTO borromean_words_new (
+                    id,
+                    knotId,
+                    text,
+                    registerType,
+                    objectPartType,
+                    emotionalWeight,
+                    importanceWeight,
+                    desireWeight,
+                    conversationId,
+                    createdAt,
+                    updatedAt,
+                    sortOrder,
+                    source,
+                    sourceConversationId,
+                    sourceMemoId,
+                    extractionEvidence,
+                    extractedAt
+                )
+                SELECT
+                    id,
+                    knotId,
+                    text,
+                    registerType,
+                    objectPartType,
+                    emotionalWeight,
+                    importanceWeight,
+                    desireWeight,
+                    conversationId,
+                    createdAt,
+                    updatedAt,
+                    sortOrder,
+                    $sourceSelect
+                FROM borromean_words
+                """.trimIndent(),
+            )
+            db.execSQL("DROP TABLE borromean_words")
+            db.execSQL("ALTER TABLE borromean_words_new RENAME TO borromean_words")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_knotId ON borromean_words(knotId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_conversationId ON borromean_words(conversationId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_borromean_words_registerType ON borromean_words(registerType)")
         }
     }
 }

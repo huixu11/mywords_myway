@@ -173,6 +173,9 @@ interface VoiceMemoDao {
     @Query("UPDATE voice_memos SET transcript = NULL, transcriptDeletedAt = :deletedAt WHERE id = :memoId")
     suspend fun markTranscriptDeleted(memoId: String, deletedAt: Instant)
 
+    @Query("UPDATE voice_memos SET transcript = :transcript, transcriptDeletedAt = NULL WHERE id = :memoId")
+    suspend fun updateMemoTranscript(memoId: String, transcript: String)
+
     @Query("UPDATE voice_memos SET transcript = NULL, transcriptDeletedAt = :deletedAt WHERE transcript IS NOT NULL AND TRIM(transcript) != ''")
     suspend fun deleteAllHiddenTranscripts(deletedAt: Instant)
 
@@ -289,6 +292,9 @@ interface BorromeanDao {
 
     @Query("SELECT COUNT(*) FROM borromean_words WHERE knotId IS NULL AND registerType = :registerType")
     suspend fun countGlobalWords(registerType: String): Int
+
+    @Query("SELECT * FROM borromean_words WHERE LOWER(text) = LOWER(:text) AND registerType = :registerType AND ((:knotId IS NULL AND knotId IS NULL) OR knotId = :knotId) LIMIT 1")
+    suspend fun findWordByTextAndRegister(text: String, registerType: String, knotId: String?): BorromeanWordEntity?
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertKnot(knot: BorromeanKnotEntity)

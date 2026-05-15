@@ -51,6 +51,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
@@ -67,8 +68,10 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Sms
@@ -91,6 +94,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Surface
@@ -158,6 +162,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.mywordsmyway.MainViewModel
 import com.mywordsmyway.RecordUiState
+import com.mywordsmyway.audio.AudioPlaybackController
+import com.mywordsmyway.audio.AudioPlaybackUiState
 import com.mywordsmyway.data.local.BorromeanKnotWithWords
 import com.mywordsmyway.data.local.BorromeanWordEntity
 import com.mywordsmyway.data.local.ConversationEntity
@@ -171,6 +177,9 @@ import com.mywordsmyway.data.local.VoiceMemoEntity
 import com.mywordsmyway.data.model.LISTENING_QUESTION
 import com.mywordsmyway.data.model.NoteFileAttachment
 import com.mywordsmyway.data.model.SUPPORT_MESSAGE
+import com.mywordsmyway.model.GemmaModelDownloadProgress
+import com.mywordsmyway.model.GEMMA_4_E4B_MODEL_NAME
+import com.mywordsmyway.model.GEMMA_4_E4B_MODEL_PAGE_URL
 import com.mywordsmyway.storage.TextExportFile
 import com.mywordsmyway.storage.plainNoteText
 import kotlinx.coroutines.Dispatchers
@@ -305,6 +314,7 @@ fun RecordScreen(
     val totalDuration = remember(savedAudioMemos) { savedAudioMemos.sumOf { it.durationMillis ?: 0L } }
     val nextRound = memos.size + 1
     val scope = rememberCoroutineScope()
+    val playbackController = remember { AudioPlaybackController(scope) }
     val context = LocalContext.current
     var hasRecordPermission by remember {
         mutableStateOf(
@@ -407,13 +417,24 @@ fun RecordScreen(
             }
         }
         itemsIndexed(memos, key = { _, memo -> memo.id }) { index, memo ->
-            MemoRow(index = index + 1, memo = memo, onDeleteAudio = {
-                scope.launch { viewModel.deleteMemoAudio(memo.id) }
-            })
+            MemoRow(
+                index = index + 1,
+                memo = memo,
+                playbackState = playbackController.state,
+                onPlayPause = { playbackController.playOrPause(memo) },
+                onSeek = playbackController::seekTo,
+                onDeleteAudio = {
+                    if (playbackController.state.memoId == memo.id) playbackController.stop()
+                    scope.launch { viewModel.deleteMemoAudio(memo.id) }
+                },
+            )
             if (index < memos.lastIndex) {
                 QuestionPanel(label = "After memo ${index + 1}")
             }
         }
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { playbackController.release() }
     }
 }
 
@@ -456,7 +477,9 @@ fun WriteNoteScreen(
     var isAddingImage by rememberSaveable { mutableStateOf(false) }
     var isAddingFile by rememberSaveable { mutableStateOf(false) }
     var showDrawingPad by rememberSaveable { mutableStateOf(false) }
+    var showAudioList by rememberSaveable { mutableStateOf(false) }
     var showFindInNote by rememberSaveable { mutableStateOf(false) }
+    var gemmaNotice by rememberSaveable { mutableStateOf("") }
     var findQuery by rememberSaveable { mutableStateOf("") }
     var findReplaceMode by rememberSaveable { mutableStateOf(false) }
     var replaceQuery by rememberSaveable { mutableStateOf("") }
@@ -473,6 +496,7 @@ fun WriteNoteScreen(
         hasRecordPermission = granted
     }
     var pendingDeviceAuthSuccess by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val playbackController = remember { AudioPlaybackController(scope) }
     val deviceAuthLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             pendingDeviceAuthSuccess?.invoke()
@@ -614,6 +638,16 @@ fun WriteNoteScreen(
                 .onSuccess {
                     error = ""
                     savedNotice = "Saved"
+                    val targetKnotId = viewModel.borromeanKnots.value.firstOrNull()?.knot?.id
+                    viewModel.extractBorromeanWords(conversationId, noteField.text, targetKnotId)
+                        .onSuccess { count ->
+                            gemmaNotice = if (count > 0) {
+                                "Gemma extracted $count word${if (count == 1) "" else "s"}."
+                            } else {
+                                ""
+                            }
+                        }
+                        .onFailure { gemmaNotice = it.message ?: "Gemma extraction could not run." }
                     if (navigateAfterSave) onSaved()
                 }
                 .onFailure {
@@ -647,6 +681,9 @@ fun WriteNoteScreen(
     }
     BackHandler {
         saveNote(navigateAfterSave = true, allowEmptyBack = true)
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { playbackController.release() }
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -695,6 +732,10 @@ fun WriteNoteScreen(
                 if (savedNotice.isNotBlank()) {
                     Spacer(Modifier.height(6.dp))
                     Text(savedNotice, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                }
+                if (gemmaNotice.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(gemmaNotice, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(Modifier.height(12.dp))
                 QuestionPanel()
@@ -747,6 +788,9 @@ fun WriteNoteScreen(
                         if (showFindInNote) closeFindInNote()
                     },
                     onDeleteAudio = { memoId -> scope.launch { viewModel.deleteMemoAudio(memoId) } },
+                    playbackState = playbackController.state,
+                    onPlayPauseMemo = { memo -> playbackController.playOrPause(memo) },
+                    onSeekMemo = playbackController::seekTo,
                     onDeleteImage = { imageId -> scope.launch { viewModel.deleteNoteImage(imageId) } },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -893,6 +937,7 @@ fun WriteNoteScreen(
                 onStart = { viewModel.startRecording() },
                 onStop = { scope.launch { viewModel.stopRecordingAndSave(conversationId) } },
                 onCancel = { viewModel.cancelRecording() },
+                onOpenAudioList = { showAudioList = true },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(
@@ -902,6 +947,20 @@ fun WriteNoteScreen(
                     ),
             )
         }
+    }
+
+    if (showAudioList) {
+        AudioMemoListSheet(
+            memos = savedAudioMemos,
+            playbackState = playbackController.state,
+            onDismiss = { showAudioList = false },
+            onPlayPause = { memo -> playbackController.playOrPause(memo) },
+            onSeek = playbackController::seekTo,
+            onDeleteAudio = { memo ->
+                if (playbackController.state.memoId == memo.id) playbackController.stop()
+                scope.launch { viewModel.deleteMemoAudio(memo.id) }
+            },
+        )
     }
 
     if (showLockDialog) {
@@ -1653,6 +1712,7 @@ private fun BorromeanObjectAHero(
                                         verticalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {
                                         Text(word.text, fontWeight = FontWeight.Medium)
+                                        GemmaWordMetadata(word = word, contentColor = colors.content)
                                         BorromeanWordNoteChip(
                                             viewModel = viewModel,
                                             word = word,
@@ -1946,6 +2006,7 @@ private fun WeightedBorromeanWordRow(
                     Icon(Icons.Default.Edit, contentDescription = "Edit word")
                 }
             }
+            GemmaWordMetadata(word = word, contentColor = colors.content)
             BorromeanWordNoteChip(
                 viewModel = viewModel,
                 word = word,
@@ -1956,6 +2017,21 @@ private fun WeightedBorromeanWordRow(
             WeightStepper(label = primaryLabel, value = primaryValue, onChange = onPrimaryChange)
             WeightStepper(label = secondaryLabel, value = secondaryValue, onChange = onSecondaryChange)
         }
+    }
+}
+
+@Composable
+private fun GemmaWordMetadata(word: BorromeanWordEntity, contentColor: Color) {
+    if (word.source != "gemma") return
+    AssistChip(onClick = {}, label = { Text("Extracted by Gemma") })
+    if (word.extractionEvidence?.isNotBlank() == true) {
+        Text(
+            word.extractionEvidence,
+            color = contentColor.copy(alpha = 0.72f),
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -2391,13 +2467,55 @@ fun PrivacyScreen(
     contentPadding: PaddingValues,
 ) {
     val usage by viewModel.storageUsage.collectAsState()
+    val modelSettings by viewModel.modelSettings.collectAsState()
+    val gemmaDownloadProgress by viewModel.gemmaDownloadProgress.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showExportDialog by rememberSaveable { mutableStateOf(false) }
     var showWordsExportDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteAudioDialog by rememberSaveable { mutableStateOf(false) }
     var deleteAudioConfirmation by rememberSaveable { mutableStateOf("") }
+    var modelPath by rememberSaveable { mutableStateOf("") }
+    var modelStatus by rememberSaveable { mutableStateOf("") }
+    var modelSetupMessage by rememberSaveable { mutableStateOf("") }
+    val isGemmaDownloadActive = gemmaDownloadProgress.isActive
+    val isGemmaModelReady = modelSettings.isLoadable
+    val isGemmaSetupLocked = isGemmaDownloadActive || isGemmaModelReady
+    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                modelSetupMessage = "Importing Gemma 4 E4B model into app storage..."
+                viewModel.importGemmaModel(uri)
+                    .onSuccess { path ->
+                        modelPath = path
+                        modelStatus = viewModel.gemmaModelStatus().getOrDefault("")
+                        modelSetupMessage = "Gemma 4 E4B model imported."
+                    }
+                    .onFailure { error ->
+                        modelSetupMessage = error.message ?: "Could not import Gemma 4 E4B model."
+                    }
+            }
+        }
+    }
     val progress = (usage.usedBytes.toFloat() / usage.limitBytes.toFloat()).coerceIn(0f, 1f)
+    LaunchedEffect(modelSettings.gemmaModelPath) {
+        modelPath = modelSettings.gemmaModelPath
+        modelStatus = viewModel.gemmaModelStatus().getOrDefault("")
+    }
+    LaunchedEffect(gemmaDownloadProgress.status) {
+        when (gemmaDownloadProgress.status) {
+            GemmaModelDownloadProgress.Status.Successful -> {
+                modelStatus = viewModel.gemmaModelStatus().getOrDefault("")
+                modelSetupMessage = "Gemma 4 E4B is downloaded and imported automatically. The app will use it for extraction."
+            }
+            GemmaModelDownloadProgress.Status.Failed -> {
+                modelSetupMessage = gemmaDownloadProgress.reason.ifBlank {
+                    "Gemma 4 E4B download failed. Open the download page, accept the license if needed, then import the .litertlm file."
+                }
+            }
+            else -> Unit
+        }
+    }
 
     Page(contentPadding = contentPadding) {
         item {
@@ -2436,6 +2554,98 @@ fun PrivacyScreen(
                 Icon(Icons.Default.Share, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Export words")
+            }
+            Spacer(Modifier.height(22.dp))
+            Text("Gemma on-device model", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Use Gemma 4 E4B on this device to extract object a words, personally important words, and what I truly want from notes and voice memos. Tap Download to this app once. When the download finishes, the model is imported automatically into private app storage.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Official model file: $GEMMA_4_E4B_MODEL_NAME",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { openUrl(context, GEMMA_4_E4B_MODEL_PAGE_URL) },
+                enabled = !isGemmaSetupLocked,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.OpenInBrowser, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Open Gemma 4 E4B download page")
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        viewModel.startGemmaModelDownload()
+                            .onSuccess {
+                                modelStatus = viewModel.gemmaModelStatus().getOrDefault("")
+                                modelSetupMessage = "Downloading Gemma 4 E4B. Keep this screen open to see progress."
+                            }
+                            .onFailure { error ->
+                                modelSetupMessage = error.message ?: "Could not start Gemma 4 E4B download."
+                            }
+                    }
+                },
+                enabled = !isGemmaSetupLocked,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    when {
+                        isGemmaDownloadActive -> "Downloading Gemma 4 E4B..."
+                        isGemmaModelReady -> "Gemma 4 E4B ready"
+                        else -> "Download to this app"
+                    },
+                )
+            }
+            if (gemmaDownloadProgress.status != GemmaModelDownloadProgress.Status.Idle) {
+                Spacer(Modifier.height(8.dp))
+                GemmaDownloadProgressView(progress = gemmaDownloadProgress)
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { modelPicker.launch(arrayOf("application/octet-stream", "*/*")) },
+                enabled = !isGemmaSetupLocked,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.AttachFile, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Import downloaded .litertlm")
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = modelPath,
+                onValueChange = { if (!isGemmaSetupLocked) modelPath = it },
+                enabled = !isGemmaSetupLocked,
+                label = { Text("Local .litertlm path (advanced)") },
+                singleLine = false,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        viewModel.setGemmaModelPath(modelPath)
+                        modelStatus = viewModel.gemmaModelStatus().getOrDefault("")
+                    }
+                },
+                enabled = !isGemmaSetupLocked,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Save Gemma model path")
+            }
+            if (modelSetupMessage.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(modelSetupMessage, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+            if (modelStatus.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(modelStatus, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -2481,6 +2691,53 @@ fun PrivacyScreen(
                 scope.launch { viewModel.deleteOldAudioNow() }
             },
         )
+    }
+}
+
+@Composable
+private fun GemmaDownloadProgressView(progress: GemmaModelDownloadProgress) {
+    val percent = progress.percent
+    val title = when (progress.status) {
+        GemmaModelDownloadProgress.Status.Pending -> "Waiting to download Gemma 4 E4B"
+        GemmaModelDownloadProgress.Status.Running -> if (percent != null) {
+            "Downloading Gemma 4 E4B: $percent%"
+        } else {
+            "Downloading Gemma 4 E4B"
+        }
+        GemmaModelDownloadProgress.Status.Successful -> "Gemma 4 E4B ready"
+        GemmaModelDownloadProgress.Status.Failed -> "Gemma 4 E4B download failed"
+        GemmaModelDownloadProgress.Status.Idle -> "Gemma 4 E4B download"
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            if (percent != null) {
+                LinearProgressIndicator(
+                    progress = { percent / 100f },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "${formatBytes(progress.downloadedBytes)} of ${formatBytes(progress.totalBytes)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else if (progress.isActive) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text("Preparing the download size...", style = MaterialTheme.typography.bodySmall)
+            }
+            if (progress.reason.isNotBlank()) {
+                Text(progress.reason, style = MaterialTheme.typography.bodySmall)
+            } else if (progress.isActive) {
+                Text(
+                    "Model setup is locked during download. When it finishes, the model is imported automatically.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
     }
 }
 
@@ -2909,6 +3166,9 @@ private fun NoteDocumentEditor(
     onFocusChange: (Boolean) -> Unit,
     onEditorTap: () -> Unit,
     onDeleteAudio: (String) -> Unit,
+    playbackState: AudioPlaybackUiState,
+    onPlayPauseMemo: (VoiceMemoEntity) -> Unit,
+    onSeekMemo: (Int) -> Unit,
     onDeleteImage: (String) -> Unit,
     findQuery: String = "",
     selectedFindRange: IntRange? = null,
@@ -2966,6 +3226,9 @@ private fun NoteDocumentEditor(
                             MemoRow(
                                 index = memos.indexOfFirst { it.id == memo.id }.takeIf { it >= 0 }?.plus(1) ?: 1,
                                 memo = memo,
+                                playbackState = playbackState,
+                                onPlayPause = { onPlayPauseMemo(memo) },
+                                onSeek = onSeekMemo,
                                 onDeleteAudio = { onDeleteAudio(memo.id) },
                             )
                         }
@@ -3764,6 +4027,9 @@ private fun InlineNoteAttachments(
     noteText: String,
     memos: List<VoiceMemoEntity>,
     images: List<NoteImageEntity>,
+    playbackState: AudioPlaybackUiState,
+    onPlayPauseMemo: (VoiceMemoEntity) -> Unit,
+    onSeekMemo: (Int) -> Unit,
     onDeleteAudio: (String) -> Unit,
     onDeleteImage: (String) -> Unit,
 ) {
@@ -3795,6 +4061,9 @@ private fun InlineNoteAttachments(
                     MemoRow(
                         index = memos.indexOfFirst { it.id == memo.id }.takeIf { it >= 0 }?.plus(1) ?: (index + 1),
                         memo = memo,
+                        playbackState = playbackState,
+                        onPlayPause = { onPlayPauseMemo(memo) },
+                        onSeek = onSeekMemo,
                         onDeleteAudio = { onDeleteAudio(memo.id) },
                     )
                 }
@@ -3958,6 +4227,7 @@ private fun FloatingRecorder(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onCancel: () -> Unit,
+    onOpenAudioList: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -4021,6 +4291,10 @@ private fun FloatingRecorder(
             if (recordState.isRecording) {
                 TextButton(onClick = onCancel) {
                     Text("Cancel")
+                }
+            } else if (memoCount > 0) {
+                IconButton(onClick = onOpenAudioList) {
+                    Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Show voice memos")
                 }
             }
         }
@@ -4442,30 +4716,106 @@ private fun shareCurrentNote(
 private fun MemoRow(
     index: Int,
     memo: VoiceMemoEntity,
+    playbackState: AudioPlaybackUiState,
+    onPlayPause: () -> Unit,
+    onSeek: (Int) -> Unit,
     onDeleteAudio: () -> Unit,
 ) {
+    val isActive = playbackState.memoId == memo.id
+    val canPlay = memo.audioPath != null
+    val durationMillis = when {
+        isActive && playbackState.durationMillis > 0 -> playbackState.durationMillis.toLong()
+        else -> memo.durationMillis ?: 0L
+    }
+    val positionMillis = if (isActive) playbackState.positionMillis.coerceAtLeast(0) else 0
     Surface(shape = RoundedCornerShape(8.dp), tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Memo $index", fontWeight = FontWeight.Medium)
-                Text(
-                    when {
-                        memo.audioPath != null -> "${formatTime(memo.createdAt)} - ${formatDuration(memo.durationMillis)}"
-                        else -> "${formatTime(memo.createdAt)} - audio deleted"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (memo.audioPath != null) {
-                IconButton(onClick = onDeleteAudio) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete memo audio")
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                if (canPlay) {
+                    IconButton(onClick = onPlayPause) {
+                        Icon(
+                            if (isActive && playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isActive && playbackState.isPlaying) "Pause memo audio" else "Play memo audio",
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Memo $index", fontWeight = FontWeight.Medium)
+                    Text(
+                        when {
+                            memo.audioPath != null -> "${formatTime(memo.createdAt)} - ${formatDuration(durationMillis)}"
+                            else -> "${formatTime(memo.createdAt)} - audio deleted"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (memo.audioPath != null) {
+                    IconButton(onClick = onDeleteAudio) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete memo audio")
+                    }
                 }
             }
+            if (canPlay) {
+                Slider(
+                    value = positionMillis.toFloat(),
+                    onValueChange = { onSeek(it.toInt()) },
+                    valueRange = 0f..durationMillis.coerceAtLeast(1L).toFloat(),
+                    enabled = isActive,
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(formatDuration(positionMillis.toLong()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(formatDuration(durationMillis), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (isActive && playbackState.errorMessage.isNotBlank()) {
+                Text(playbackState.errorMessage, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AudioMemoListSheet(
+    memos: List<VoiceMemoEntity>,
+    playbackState: AudioPlaybackUiState,
+    onDismiss: () -> Unit,
+    onPlayPause: (VoiceMemoEntity) -> Unit,
+    onSeek: (Int) -> Unit,
+    onDeleteAudio: (VoiceMemoEntity) -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Voice memos", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                "${memos.size} saved - ${formatDuration(memos.sumOf { it.durationMillis ?: 0L })}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (memos.isEmpty()) {
+                Text("No saved audio in this note.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                memos.forEachIndexed { index, memo ->
+                    MemoRow(
+                        index = index + 1,
+                        memo = memo,
+                        playbackState = playbackState,
+                        onPlayPause = { onPlayPause(memo) },
+                        onSeek = onSeek,
+                        onDeleteAudio = { onDeleteAudio(memo) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -4869,6 +5219,12 @@ private fun shareTextFile(context: Context, export: TextExportFile, chooserTitle
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(intent, chooserTitle))
+}
+
+private fun openUrl(context: Context, url: String) {
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
 }
 
 private val dateFormatter = DateTimeFormatter.ofPattern("MMM dd, yyyy").withZone(ZoneId.systemDefault())

@@ -4,6 +4,7 @@ import com.mywordsmyway.data.local.BorromeanKnotWithWords
 import com.mywordsmyway.data.local.BorromeanWordEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
 import com.mywordsmyway.data.local.NounWithLinksEntity
+import com.mywordsmyway.data.model.BorromeanWordCandidate
 import kotlinx.coroutines.flow.Flow
 
 interface WordRepository {
@@ -44,4 +45,5 @@ interface WordRepository {
     suspend fun updateBorromeanWordWeights(wordId: String, emotionalWeight: Int, importanceWeight: Int, desireWeight: Int)
     suspend fun deleteBorromeanWord(wordId: String)
     suspend fun linkBorromeanWordToConversation(wordId: String, conversationId: String)
+    suspend fun saveExtractedBorromeanWords(conversationId: String, objectKnotId: String?, candidates: List<BorromeanWordCandidate>): Int
 }

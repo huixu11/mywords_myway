@@ -172,6 +172,11 @@ data class BorromeanWordEntity(
     val createdAt: Instant,
     val updatedAt: Instant,
     val sortOrder: Int,
+    val source: String,
+    val sourceConversationId: String?,
+    val sourceMemoId: String?,
+    val extractionEvidence: String?,
+    val extractedAt: Instant?,
 )
 
 @Entity(

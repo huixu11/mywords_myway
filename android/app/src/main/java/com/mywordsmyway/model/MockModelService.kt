@@ -1,6 +1,8 @@
 package com.mywordsmyway.model
 
 import com.mywordsmyway.data.model.NounCandidate
+import com.mywordsmyway.data.model.BorromeanExtractionResult
+import com.mywordsmyway.data.model.BorromeanWordCandidate
 import com.mywordsmyway.data.model.NounExtractionResult
 import com.mywordsmyway.data.model.SUPPORT_MESSAGE
 import com.mywordsmyway.data.model.SafetyResult
@@ -104,12 +106,87 @@ class MockModelService : ModelService {
         NounExtractionResult(candidateNouns = found)
     }
 
+    override suspend fun extractBorromeanWords(
+        sourceText: String,
+        existingWords: List<String>,
+    ): BorromeanExtractionResult = withContext(Dispatchers.Default) {
+        val existing = existingWords.map { it.trim().lowercase() }.toSet()
+        val lowered = sourceText.lowercase()
+        val objectWords = listOf("eyes", "smile", "hair", "voice", "breast", "excrement")
+        val affectWords = listOf("respect", "money", "good person", "beautiful", "warm")
+        val desireWords = listOf("solve scientific problems", "earn money", "make my own choice", "study freely")
+        val candidates = buildList {
+            objectWords.forEach { word ->
+                if (lowered.contains(word) && word !in existing) {
+                    add(
+                        BorromeanWordCandidate(
+                            text = word,
+                            registerType = "object_a",
+                            objectPartType = objectPartTypeFor(word),
+                            emotionalWeight = 72,
+                            importanceWeight = 70,
+                            evidence = evidenceFor(sourceText, word),
+                            confidence = "medium",
+                        ),
+                    )
+                }
+            }
+            affectWords.forEach { word ->
+                if (lowered.contains(word) && word !in existing) {
+                    add(
+                        BorromeanWordCandidate(
+                            text = word,
+                            registerType = "affect",
+                            emotionalWeight = 78,
+                            importanceWeight = 78,
+                            evidence = evidenceFor(sourceText, word),
+                            confidence = "medium",
+                        ),
+                    )
+                }
+            }
+            desireWords.forEach { word ->
+                if (lowered.contains(word) && word !in existing) {
+                    add(
+                        BorromeanWordCandidate(
+                            text = word,
+                            registerType = "desire",
+                            desireWeight = 82,
+                            importanceWeight = 76,
+                            evidence = evidenceFor(sourceText, word),
+                            confidence = "medium",
+                        ),
+                    )
+                }
+            }
+        }
+        BorromeanExtractionResult(candidateWords = candidates.take(12))
+    }
+
+    override suspend fun modelStatus(): String = "Mock Gemma extraction"
+
     private fun findMatch(noun: String, text: String): IntRange? {
         val terms = (listOf(noun) + aliases.orEmpty(noun)).sortedByDescending { it.length }
         return terms.firstNotNullOfOrNull { term ->
             val suffix = if (term.endsWith("s")) "" else "s?"
             Regex("\\b${Regex.escape(term)}$suffix\\b").find(text)?.range
         }
+    }
+
+    private fun objectPartTypeFor(word: String): String? =
+        when (word) {
+            "eyes", "smile", "hair" -> "gaze"
+            "voice" -> "voice"
+            "breast" -> "breast"
+            "excrement" -> "excrement"
+            else -> null
+        }
+
+    private fun evidenceFor(sourceText: String, word: String): String {
+        val match = Regex("\\b${Regex.escape(word)}\\b", RegexOption.IGNORE_CASE).find(sourceText) ?: return ""
+        val start = (match.range.first - 80).coerceAtLeast(0)
+        val end = (match.range.last + 100).coerceAtMost(sourceText.length)
+        return sourceText.substring(start, end).trim()
     }
 
     private fun sceneTypeFor(noun: String, text: String, start: Int, end: Int): String =
