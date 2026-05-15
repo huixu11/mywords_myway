@@ -4720,6 +4720,7 @@ private fun MemoRow(
     onPlayPause: () -> Unit,
     onSeek: (Int) -> Unit,
     onDeleteAudio: () -> Unit,
+    showDeleteIcon: Boolean = true,
 ) {
     val isActive = playbackState.memoId == memo.id
     val canPlay = memo.audioPath != null
@@ -4753,7 +4754,7 @@ private fun MemoRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (memo.audioPath != null) {
+                if (showDeleteIcon && memo.audioPath != null) {
                     IconButton(onClick = onDeleteAudio) {
                         Icon(Icons.Default.Delete, contentDescription = "Delete memo audio")
                     }
@@ -4788,6 +4789,7 @@ private fun AudioMemoListSheet(
     onSeek: (Int) -> Unit,
     onDeleteAudio: (VoiceMemoEntity) -> Unit,
 ) {
+    var memoPendingDelete by remember { mutableStateOf<VoiceMemoEntity?>(null) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -4805,19 +4807,75 @@ private fun AudioMemoListSheet(
                 Text("No saved audio in this note.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 memos.forEachIndexed { index, memo ->
-                    MemoRow(
-                        index = index + 1,
-                        memo = memo,
-                        playbackState = playbackState,
-                        onPlayPause = { onPlayPause(memo) },
-                        onSeek = onSeek,
-                        onDeleteAudio = { onDeleteAudio(memo) },
-                    )
+                    if (memo.audioPath != null) {
+                        SwipeToDeleteRow(
+                            contentDescription = "Delete memo audio",
+                            onDelete = { memoPendingDelete = memo },
+                        ) {
+                            MemoRow(
+                                index = index + 1,
+                                memo = memo,
+                                playbackState = playbackState,
+                                onPlayPause = { onPlayPause(memo) },
+                                onSeek = onSeek,
+                                onDeleteAudio = { memoPendingDelete = memo },
+                                showDeleteIcon = false,
+                            )
+                        }
+                    } else {
+                        MemoRow(
+                            index = index + 1,
+                            memo = memo,
+                            playbackState = playbackState,
+                            onPlayPause = { onPlayPause(memo) },
+                            onSeek = onSeek,
+                            onDeleteAudio = {},
+                            showDeleteIcon = false,
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))
         }
     }
+    memoPendingDelete?.let { memo ->
+        DeleteMemoAudioConfirmationDialog(
+            memo = memo,
+            onDismiss = { memoPendingDelete = null },
+            onDelete = {
+                memoPendingDelete = null
+                onDeleteAudio(memo)
+            },
+        )
+    }
+}
+
+@Composable
+private fun DeleteMemoAudioConfirmationDialog(
+    memo: VoiceMemoEntity,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete this voice memo audio?") },
+        text = {
+            Text(
+                "This deletes Memo ${formatTime(memo.createdAt)} audio from this device. The note and any text in the note are kept.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDelete) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable
