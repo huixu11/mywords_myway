@@ -29,11 +29,15 @@ class GemmaModelService(
         fallback.extractNouns(sourceText, existingNouns)
 
     override suspend fun extractBorromeanWords(sourceText: String, existingWords: List<String>): BorromeanExtractionResult = withContext(Dispatchers.Default) {
+        val settings = settingsRepository.settings.first()
+        if (!settings.isLoadable) {
+            return@withContext BorromeanExtractionResult(candidateWords = emptyList())
+        }
         runCatching {
             val prompt = buildBorromeanPrompt(sourceText, existingWords)
             parseBorromeanJson(generate(prompt))
         }.getOrElse {
-            fallback.extractBorromeanWords(sourceText, existingWords)
+            BorromeanExtractionResult(candidateWords = emptyList())
         }
     }
 

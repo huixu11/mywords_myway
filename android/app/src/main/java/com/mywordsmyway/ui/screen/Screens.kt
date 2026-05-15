@@ -1275,7 +1275,13 @@ fun WordsScreen(
             )
             Spacer(Modifier.height(18.dp))
             if (activeKnot == null) {
-                Text("No Borromean knots yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("No Gemma-extracted Borromean knots yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Set up the Gemma 4 E4B model in Privacy, then save notes or voice memos. Gemma will extract object a words and create knots here.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
@@ -1289,7 +1295,7 @@ fun WordsScreen(
                         }
                     },
                 ) {
-                    Text("Create knot")
+                    Text("Create knot manually")
                 }
                 return@item
             }
