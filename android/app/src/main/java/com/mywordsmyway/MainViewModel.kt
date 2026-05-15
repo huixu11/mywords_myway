@@ -26,6 +26,7 @@ import com.mywordsmyway.model.ModelService
 import com.mywordsmyway.model.GemmaModelDownloadProgress
 import com.mywordsmyway.model.ModelSettings
 import com.mywordsmyway.model.ModelSettingsRepository
+import com.mywordsmyway.storage.AudioExportFile
 import com.mywordsmyway.recorder.AndroidAudioRecorder
 import com.mywordsmyway.storage.NotesExporter
 import com.mywordsmyway.storage.TextExportFile
@@ -376,6 +377,14 @@ class MainViewModel(
 
     suspend fun createWordsExport(): Result<TextExportFile> = runCatching {
         notesExporter.writeWordsExport()
+    }
+
+    suspend fun createNoteAudioExport(conversationId: String): Result<AudioExportFile> = runCatching {
+        notesExporter.writeNoteAudioExport(conversationId)
+    }
+
+    suspend fun createAllAudioExport(): Result<AudioExportFile> = runCatching {
+        notesExporter.writeAllAudioExport()
     }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {

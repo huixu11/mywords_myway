@@ -9,10 +9,17 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 data class TextExportFile(
     val uri: Uri,
     val text: String,
+)
+
+data class AudioExportFile(
+    val uri: Uri,
+    val displayName: String,
 )
 
 class NotesExporter(
@@ -108,6 +115,32 @@ class NotesExporter(
         )
     }
 
+    suspend fun writeNoteAudioExport(conversationId: String): AudioExportFile = withContext(Dispatchers.IO) {
+        val note = database.conversationDao().getConversation(conversationId)
+        val memos = database.voiceMemoDao()
+            .getMemosForConversation(conversationId)
+            .filter { it.audioPath?.let { path -> File(path).isFile } == true }
+        require(memos.isNotEmpty()) { "This note does not have saved audio to export." }
+        val baseName = "my_words_my_way_${safeFileName(note?.title ?: "note")}_audio"
+        writeAudioZip(
+            outputName = "$baseName.zip",
+            memos = memos,
+            entryPrefix = baseName,
+        )
+    }
+
+    suspend fun writeAllAudioExport(): AudioExportFile = withContext(Dispatchers.IO) {
+        val memos = database.voiceMemoDao()
+            .getCleanupCandidates()
+            .filter { it.audioPath?.let { path -> File(path).isFile } == true }
+        require(memos.isNotEmpty()) { "There is no saved voice memo audio to export." }
+        writeAudioZip(
+            outputName = "my_words_my_way_audios.zip",
+            memos = memos,
+            entryPrefix = "my_words_my_way_audios",
+        )
+    }
+
     private fun StringBuilder.appendWordsSection(title: String, words: List<com.mywordsmyway.data.local.BorromeanWordEntity>) {
         if (words.isEmpty()) return
         appendLine(title)
@@ -122,4 +155,37 @@ class NotesExporter(
         }
         appendLine()
     }
+
+    private fun writeAudioZip(
+        outputName: String,
+        memos: List<com.mywordsmyway.data.local.VoiceMemoEntity>,
+        entryPrefix: String,
+    ): AudioExportFile {
+        val outputDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val outputFile = File(outputDir, outputName)
+        ZipOutputStream(outputFile.outputStream().buffered()).use { zip ->
+            memos.forEachIndexed { index, memo ->
+                val source = File(requireNotNull(memo.audioPath))
+                val extension = source.extension.ifBlank { "m4a" }
+                val entryName = "$entryPrefix/memo_${index + 1}_${safeFileName(dateFormatter.format(memo.createdAt))}.$extension"
+                zip.putNextEntry(ZipEntry(entryName))
+                source.inputStream().buffered().use { input -> input.copyTo(zip) }
+                zip.closeEntry()
+            }
+        }
+        return AudioExportFile(
+            uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                outputFile,
+            ),
+            displayName = outputName,
+        )
+    }
+
+    private fun safeFileName(value: String): String =
+        value.lowercase()
+            .replace(Regex("[^a-z0-9._-]+"), "_")
+            .trim('_')
+            .ifBlank { "audio" }
 }

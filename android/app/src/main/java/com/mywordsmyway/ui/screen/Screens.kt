@@ -180,6 +180,7 @@ import com.mywordsmyway.data.model.SUPPORT_MESSAGE
 import com.mywordsmyway.model.GemmaModelDownloadProgress
 import com.mywordsmyway.model.GEMMA_4_E4B_MODEL_NAME
 import com.mywordsmyway.model.GEMMA_4_E4B_MODEL_PAGE_URL
+import com.mywordsmyway.storage.AudioExportFile
 import com.mywordsmyway.storage.TextExportFile
 import com.mywordsmyway.storage.plainNoteText
 import kotlinx.coroutines.Dispatchers
@@ -815,6 +816,14 @@ fun WriteNoteScreen(
                 onUndo = ::undoNoteEdit,
                 onRedo = ::redoNoteEdit,
                 onShare = { shareCurrentNote(context, title, noteField.text, images.size, savedAudioMemos.size) },
+                onExportAudio = {
+                    scope.launch {
+                        viewModel.createNoteAudioExport(conversationId)
+                            .onSuccess { shareAudioExport(context, it, "Export note audio") }
+                            .onFailure { error = it.message ?: "Could not export note audio." }
+                    }
+                },
+                canExportAudio = savedAudioMemos.isNotEmpty(),
                 onFind = {
                     focusManager.clearFocus()
                     showFindInNote = true
@@ -2473,6 +2482,7 @@ fun PrivacyScreen(
     val scope = rememberCoroutineScope()
     var showExportDialog by rememberSaveable { mutableStateOf(false) }
     var showWordsExportDialog by rememberSaveable { mutableStateOf(false) }
+    var showAudioExportDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteAudioDialog by rememberSaveable { mutableStateOf(false) }
     var deleteAudioConfirmation by rememberSaveable { mutableStateOf("") }
     var modelPath by rememberSaveable { mutableStateOf("") }
@@ -2554,6 +2564,12 @@ fun PrivacyScreen(
                 Icon(Icons.Default.Share, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Export words")
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { showAudioExportDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Share, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Export audios")
             }
             Spacer(Modifier.height(22.dp))
             Text("Gemma on-device model", style = MaterialTheme.typography.titleLarge)
@@ -2676,6 +2692,21 @@ fun PrivacyScreen(
                 scope.launch {
                     viewModel.createWordsExport()
                         .onSuccess { shareTextFile(context, it, "Export words") }
+                }
+            },
+        )
+    }
+    if (showAudioExportDialog) {
+        ExportDialog(
+            title = "Export audios?",
+            includedItems = listOf("saved voice memo audio files"),
+            excludedItems = listOf("written note text", "words", "note images", "deleted audio"),
+            onDismiss = { showAudioExportDialog = false },
+            onExport = {
+                showAudioExportDialog = false
+                scope.launch {
+                    viewModel.createAllAudioExport()
+                        .onSuccess { shareAudioExport(context, it, "Export audios") }
                 }
             },
         )
@@ -3597,6 +3628,8 @@ private fun NoteTopBar(
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onShare: () -> Unit,
+    onExportAudio: () -> Unit,
+    canExportAudio: Boolean,
     onFind: () -> Unit,
     onLock: () -> Unit,
     onRemoveLock: () -> Unit,
@@ -3641,6 +3674,15 @@ private fun NoteTopBar(
                         onClick = {
                             moreOpen = false
                             onFind()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Export audio") },
+                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                        enabled = canExportAudio,
+                        onClick = {
+                            moreOpen = false
+                            onExportAudio()
                         },
                     )
                     DropdownMenuItem(
@@ -5273,6 +5315,16 @@ private fun shareTextFile(context: Context, export: TextExportFile, chooserTitle
         type = "text/plain"
         putExtra(Intent.EXTRA_SUBJECT, chooserTitle)
         putExtra(Intent.EXTRA_TEXT, export.text)
+        putExtra(Intent.EXTRA_STREAM, export.uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(intent, chooserTitle))
+}
+
+private fun shareAudioExport(context: Context, export: AudioExportFile, chooserTitle: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "application/zip"
+        putExtra(Intent.EXTRA_SUBJECT, export.displayName)
         putExtra(Intent.EXTRA_STREAM, export.uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
