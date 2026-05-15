@@ -315,8 +315,8 @@ fun RecordScreen(
     val totalDuration = remember(savedAudioMemos) { savedAudioMemos.sumOf { it.durationMillis ?: 0L } }
     val nextRound = memos.size + 1
     val scope = rememberCoroutineScope()
-    val playbackController = remember { AudioPlaybackController(scope) }
     val context = LocalContext.current
+    val playbackController = remember(context) { AudioPlaybackController(context, scope) }
     var hasRecordPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
@@ -497,7 +497,7 @@ fun WriteNoteScreen(
         hasRecordPermission = granted
     }
     var pendingDeviceAuthSuccess by remember { mutableStateOf<(() -> Unit)?>(null) }
-    val playbackController = remember { AudioPlaybackController(scope) }
+    val playbackController = remember(context) { AudioPlaybackController(context, scope) }
     val deviceAuthLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             pendingDeviceAuthSuccess?.invoke()

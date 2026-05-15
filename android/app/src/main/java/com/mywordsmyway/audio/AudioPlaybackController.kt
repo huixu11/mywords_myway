@@ -1,6 +1,8 @@
 package com.mywordsmyway.audio
 
+import android.content.Context
 import android.media.MediaPlayer
+import android.os.PowerManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -20,6 +22,7 @@ data class AudioPlaybackUiState(
 )
 
 class AudioPlaybackController(
+    private val context: Context,
     private val scope: CoroutineScope,
 ) {
     var state by mutableStateOf(AudioPlaybackUiState())
@@ -73,6 +76,7 @@ class AudioPlaybackController(
         }
         runCatching {
             MediaPlayer().apply {
+                setWakeMode(context.applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
                 setDataSource(audioFile.absolutePath)
                 setOnCompletionListener {
                     progressJob?.cancel()
