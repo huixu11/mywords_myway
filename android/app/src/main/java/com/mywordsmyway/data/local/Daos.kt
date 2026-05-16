@@ -76,6 +76,9 @@ interface ConversationDao {
     @Query("UPDATE conversations SET folderId = :targetFolderId WHERE folderId = :sourceFolderId")
     suspend fun moveConversationsToFolder(sourceFolderId: String, targetFolderId: String?)
 
+    @Query("SELECT * FROM conversations WHERE folderId = :folderId")
+    suspend fun getConversationsInFolder(folderId: String): List<ConversationEntity>
+
     @Query("UPDATE conversations SET safetyStatus = :safetyStatus WHERE id = :conversationId")
     suspend fun updateSafetyStatus(conversationId: String, safetyStatus: String)
 

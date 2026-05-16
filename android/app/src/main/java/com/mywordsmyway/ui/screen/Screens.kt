@@ -1647,6 +1647,7 @@ fun NotesScreen(
     val searchResults = remember(notes, query) { rankedNoteSearchResults(notes, query) }
     val topHits = remember(searchResults, query) { if (query.isBlank()) emptyList() else searchResults.take(3) }
     var notePendingDelete by remember { mutableStateOf<ConversationEntity?>(null) }
+    var folderPendingDelete by remember { mutableStateOf<NoteFolderWithCount?>(null) }
     fun createNoteInCurrentFolder() {
         scope.launch {
             viewModel.startNote(selectedFolderId)
@@ -1710,7 +1711,16 @@ fun NotesScreen(
                 }
             } else if (selectedFolder == null) {
                 items(folders, key = { it.folder.id }) { folder ->
-                    NoteFolderRow(folder = folder, onClick = { selectedFolderId = folder.folder.id })
+                    if (folder.folder.isDefault) {
+                        NoteFolderRow(folder = folder, onClick = { selectedFolderId = folder.folder.id })
+                    } else {
+                        SwipeToDeleteRow(
+                            contentDescription = "Delete folder",
+                            onDelete = { folderPendingDelete = folder },
+                        ) {
+                            NoteFolderRow(folder = folder, onClick = { selectedFolderId = folder.folder.id })
+                        }
+                    }
                 }
             } else {
                 item {
@@ -1753,6 +1763,24 @@ fun NotesScreen(
                     viewModel.deleteConversation(note.id)
                         .onSuccess { notePendingDelete = null }
                         .onFailure { createError = it.message ?: "Could not delete note." }
+                }
+            },
+        )
+    }
+    folderPendingDelete?.let { folder ->
+        DeleteFolderConfirmationDialog(
+            folder = folder,
+            onDismiss = { folderPendingDelete = null },
+            onDelete = {
+                scope.launch {
+                    viewModel.deleteNoteFolder(folder.folder.id)
+                        .onSuccess {
+                            if (selectedFolderId == folder.folder.id) {
+                                selectedFolderId = null
+                            }
+                            folderPendingDelete = null
+                        }
+                        .onFailure { createError = it.message ?: "Could not delete folder." }
                 }
             },
         )
@@ -5376,6 +5404,34 @@ private fun DeleteNoteConfirmationDialog(
         text = {
             Text(
                 "This deletes \"${note.title.ifBlank { "Untitled note" }}\" and its attachments. Notes are precious, so delete one at a time.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDelete) {
+                Text("Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DeleteFolderConfirmationDialog(
+    folder: NoteFolderWithCount,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete this folder?") },
+        text = {
+            Text(
+                "This deletes the folder \"${folder.folder.name}\" and its ${folder.noteCount} ${if (folder.noteCount == 1) "note" else "notes"}. This cannot be undone.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },

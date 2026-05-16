@@ -158,7 +158,15 @@ class DefaultConversationRepository(
 
     override suspend fun deleteNoteFolder(folderId: String) {
         database.withTransaction {
-            conversationDao.moveConversationsToFolder(folderId, DEFAULT_NOTE_FOLDER_ID)
+            conversationDao.getConversationsInFolder(folderId).forEach { conversation ->
+                memoDao.getMemosForConversation(conversation.id).forEach { memo ->
+                    if (memo.audioPath != null) {
+                        storageRepository.deleteMemoAudio(memo.id)
+                    }
+                }
+                noteImageDao.getImagesForConversation(conversation.id).forEach { deleteNoteImageFile(it.imagePath) }
+                conversationDao.deleteConversation(conversation.id)
+            }
             conversationDao.deleteNoteFolder(folderId)
         }
     }

@@ -136,23 +136,25 @@ The core principle is:
 
 ## Demo Video Script
 
-Opening, 0:00-0:20:
-My Words, My Way is a local-first Android app built with Gemma 4. It is not an AI therapist. It is a private listening tool that helps people preserve their own words.
+Use `demo/VIDEO_RUNBOOK.md` and `demo/VOICEOVER_SCRIPT.md` to record separate clips, then choose the best takes and concatenate them.
 
-Problem, 0:20-0:45:
-Most AI reflection apps respond too quickly. They summarize and interpret the user. For intimate reflection, that can be unsafe because the model starts to sound like an authority.
+Opening, 0:00-0:20, `01_opening_people_phone.mp4`:
+My Words, My Way is a local-first Android app built with Gemma 4. It is not an AI therapist. It is a private listening tool that helps people preserve their own words. Showing different kinds of people use their phone to talk.
 
-Solution, 0:45-1:20:
-In this app, the user records voice memos and writes notes. Gemma 4 E2B runs on device and extracts important words from the user's notes and memo text. The model returns structured JSON only. It does not advise, diagnose, or explain the user.
+Problem, 0:20-0:45, `02_problem_llm_too_much.mp4`:
+Most AI reflection apps respond too quickly. They summarize and interpret the user. For intimate reflection, that can be unsafe because the model starts to sound like an authority. Showing LLM knows everything, answering everything. Showing that these LLMs do not solve the problems from people's lives.
 
-Demo, 1:20-2:15:
+Solution, 0:45-1:20, `03_record_note_flow.mp4`:
+In this app, the user records voice memos and writes notes. Gemma 4 E2B runs on device and extracts important words from the user's notes and memo text. The model returns structured JSON only. It does not advise, diagnose, or explain the user. Navigate the apps.
+
+Demo, 1:20-2:15, `04_gemma_calculation.mp4` and `05_borromean_words.mp4`:
 Show recording a memo, writing a note, opening the Words tab, starting Gemma calculation, watching progress and logs, and seeing extracted words appear in the Borromean knot view. Show that edited notes can be recalculated and that words can be deleted or exported.
 
-Technical, 2:15-2:40:
+Technical, 2:15-2:40, `06_privacy_audio_export.mp4`:
 The app is built with Kotlin, Jetpack Compose, Room, foreground audio playback, local exports, and LiteRT-LM. Gemma 4 E2B is loaded from a local `.litertlm` file, processed on device, and released after generation to protect phone memory.
 
-Closing, 2:40-3:00:
-The goal is not to make AI know the user. The goal is to help the user keep their own words private, searchable, and editable. This is AI for good through restraint.
+Closing, 2:40-3:00, `07_closing.mp4`:
+The goal is not to make AI know the user. The goal is to help the user keep their own words private, searchable, and editable. Most AI assistants speak for the user. My Words, My Way helps the user keep speaking until their own words become powerful.
 
 ## Submission Checklist
 
