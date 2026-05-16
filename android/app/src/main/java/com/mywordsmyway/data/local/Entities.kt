@@ -90,6 +90,23 @@ data class NoteImageEntity(
     val createdAt: Instant,
 )
 
+@Entity(
+    tableName = "gemma_note_processing",
+    foreignKeys = [
+        ForeignKey(
+            entity = ConversationEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["conversationId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+)
+data class GemmaNoteProcessingEntity(
+    @PrimaryKey val conversationId: String,
+    val processedAt: Instant,
+    val status: String,
+)
+
 @Entity(tableName = "nouns")
 data class NounEntity(
     @PrimaryKey val id: String,

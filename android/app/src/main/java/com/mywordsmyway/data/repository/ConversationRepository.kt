@@ -23,6 +23,11 @@ interface ConversationRepository {
     fun observeNoteFolders(): Flow<List<NoteFolderWithCount>>
     fun observeNotes(folderId: String?, query: String, startDate: String, endDate: String): Flow<List<ConversationEntity>>
     fun observeNotesInFolder(folderId: String?, startDate: String, endDate: String): Flow<List<ConversationEntity>>
+    fun observeUnprocessedGemmaNoteCount(): Flow<Int>
+    suspend fun getAllNoteContent(): List<ConversationEntity>
+    suspend fun getUnprocessedGemmaNoteContent(): List<ConversationEntity>
+    suspend fun markGemmaNoteProcessed(conversationId: String)
+    suspend fun clearGemmaProcessedNotes()
     suspend fun startConversation(paymentAcknowledged: Boolean): StartConversationResult
     suspend fun startConversation(paymentAcknowledged: Boolean, folderId: String?): StartConversationResult
     suspend fun createNoteFolder(name: String)

@@ -14,16 +14,17 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.io.File
 
-const val GEMMA_4_E4B_MODEL_NAME = "gemma-4-E4B-it.litertlm"
-const val GEMMA_4_E4B_MODEL_REPO = "litert-community/gemma-4-E4B-it-litert-lm"
-const val GEMMA_4_E4B_MODEL_PAGE_URL = "https://huggingface.co/$GEMMA_4_E4B_MODEL_REPO"
-const val GEMMA_4_E4B_MODEL_DOWNLOAD_URL = "$GEMMA_4_E4B_MODEL_PAGE_URL/resolve/main/$GEMMA_4_E4B_MODEL_NAME?download=true"
+const val GEMMA_4_E2B_MODEL_NAME = "gemma-4-E2B-it.litertlm"
+const val GEMMA_4_E2B_MODEL_REPO = "litert-community/gemma-4-E2B-it-litert-lm"
+const val GEMMA_4_E2B_MODEL_PAGE_URL = "https://huggingface.co/$GEMMA_4_E2B_MODEL_REPO"
+const val GEMMA_4_E2B_MODEL_DOWNLOAD_URL = "$GEMMA_4_E2B_MODEL_PAGE_URL/resolve/main/$GEMMA_4_E2B_MODEL_NAME?download=true"
 
 data class ModelSettings(
     val gemmaModelPath: String = "",
 ) {
     val isConfigured: Boolean = gemmaModelPath.isNotBlank()
     val isLoadable: Boolean = isConfigured && File(gemmaModelPath).isFile
+    val isExpectedGemmaModel: Boolean = isLoadable && File(gemmaModelPath).name == GEMMA_4_E2B_MODEL_NAME
 }
 
 data class GemmaModelDownloadProgress(
@@ -62,7 +63,7 @@ class ModelSettingsRepository(
     private val modelDirectory: File
         get() = File(context.getExternalFilesDir(null), "models").apply { mkdirs() }
     private val gemmaModelFile: File
-        get() = File(modelDirectory, GEMMA_4_E4B_MODEL_NAME)
+        get() = File(modelDirectory, GEMMA_4_E2B_MODEL_NAME)
 
     val settings: Flow<ModelSettings> = context.modelSettingsDataStore.data.map { preferences ->
         ModelSettings(gemmaModelPath = preferences[gemmaModelPathKey].orEmpty())
@@ -88,9 +89,9 @@ class ModelSettingsRepository(
 
     suspend fun startGemmaModelDownload(): Long {
         val target = gemmaModelFile
-        val request = DownloadManager.Request(Uri.parse(GEMMA_4_E4B_MODEL_DOWNLOAD_URL))
-            .setTitle("Gemma 4 E4B model")
-            .setDescription("Downloading $GEMMA_4_E4B_MODEL_NAME for My Words My Way")
+        val request = DownloadManager.Request(Uri.parse(GEMMA_4_E2B_MODEL_DOWNLOAD_URL))
+            .setTitle("Gemma 4 E2B model")
+            .setDescription("Downloading $GEMMA_4_E2B_MODEL_NAME for My Words My Way")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(false)
@@ -113,7 +114,7 @@ class ModelSettingsRepository(
                     GemmaModelDownloadProgress(
                         downloadId = downloadId,
                         status = GemmaModelDownloadProgress.Status.Failed,
-                        reason = "The Gemma 4 E4B download could not be found.",
+                        reason = "The Gemma 4 E2B download could not be found.",
                     )
                 } else {
                     cursor.toGemmaDownloadProgress(downloadId)

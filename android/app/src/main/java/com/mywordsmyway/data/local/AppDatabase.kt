@@ -17,12 +17,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NounEntity::class,
         NounLinkEntity::class,
         NounSuggestionEntity::class,
+        GemmaNoteProcessingEntity::class,
         BorromeanKnotEntity::class,
         BorromeanWordEntity::class,
         SafetyEventEntity::class,
         PaymentEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 @TypeConverters(InstantConverters::class)
@@ -31,6 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun voiceMemoDao(): VoiceMemoDao
     abstract fun noteImageDao(): NoteImageDao
     abstract fun nounDao(): NounDao
+    abstract fun gemmaNoteProcessingDao(): GemmaNoteProcessingDao
     abstract fun borromeanDao(): BorromeanDao
     abstract fun safetyEventDao(): SafetyEventDao
     abstract fun paymentDao(): PaymentDao
@@ -46,7 +48,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "my_words_my_way.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     .build()
                     .also { instance = it }
             }
@@ -246,6 +248,21 @@ abstract class AppDatabase : RoomDatabase() {
         private val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 recreateBorromeanWordsForGemma(db, sourceColumnsExist = true)
+            }
+        }
+
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS gemma_note_processing (
+                        conversationId TEXT NOT NULL PRIMARY KEY,
+                        processedAt INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        FOREIGN KEY(conversationId) REFERENCES conversations(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
             }
         }
 

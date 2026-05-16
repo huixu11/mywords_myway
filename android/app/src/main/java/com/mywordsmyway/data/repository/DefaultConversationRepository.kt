@@ -8,6 +8,7 @@ import com.mywordsmyway.data.local.AppDatabase
 import com.mywordsmyway.data.local.ConversationEntity
 import com.mywordsmyway.data.local.ConversationSummaryEntity
 import com.mywordsmyway.data.local.DEFAULT_NOTE_FOLDER_ID
+import com.mywordsmyway.data.local.GemmaNoteProcessingEntity
 import com.mywordsmyway.data.local.NoteImageEntity
 import com.mywordsmyway.data.local.NoteFolderEntity
 import com.mywordsmyway.data.local.NoteFolderWithCount
@@ -55,6 +56,7 @@ class DefaultConversationRepository(
     private val memoDao = database.voiceMemoDao()
     private val noteImageDao = database.noteImageDao()
     private val nounDao = database.nounDao()
+    private val gemmaNoteProcessingDao = database.gemmaNoteProcessingDao()
     private val paymentDao = database.paymentDao()
     private val safetyEventDao = database.safetyEventDao()
 
@@ -116,6 +118,31 @@ class DefaultConversationRepository(
             start = parseStartDate(startDate),
             end = parseEndDate(endDate),
         )
+
+    override suspend fun getAllNoteContent(): List<ConversationEntity> = withContext(Dispatchers.IO) {
+        conversationDao.getAllNoteContent()
+    }
+
+    override fun observeUnprocessedGemmaNoteCount(): Flow<Int> =
+        conversationDao.observeUnprocessedGemmaNoteCount()
+
+    override suspend fun getUnprocessedGemmaNoteContent(): List<ConversationEntity> = withContext(Dispatchers.IO) {
+        conversationDao.getUnprocessedGemmaNoteContent()
+    }
+
+    override suspend fun markGemmaNoteProcessed(conversationId: String) = withContext(Dispatchers.IO) {
+        gemmaNoteProcessingDao.upsert(
+            GemmaNoteProcessingEntity(
+                conversationId = conversationId,
+                processedAt = clock.instant(),
+                status = "processed",
+            ),
+        )
+    }
+
+    override suspend fun clearGemmaProcessedNotes() = withContext(Dispatchers.IO) {
+        gemmaNoteProcessingDao.clearAll()
+    }
 
     override suspend fun createNoteFolder(name: String) {
         val cleanName = name.trim()
@@ -242,6 +269,7 @@ class DefaultConversationRepository(
         )
         database.withTransaction {
             memoDao.insertMemo(memo)
+            gemmaNoteProcessingDao.clear(conversationId)
             conversationDao.updateSafetyStatus(conversationId, safety.riskLevel)
             if (safety.riskLevel != "none") {
                 safetyEventDao.insertSafetyEvent(
@@ -284,7 +312,10 @@ class DefaultConversationRepository(
             sortOrder = noteImageDao.countForConversation(conversationId),
             createdAt = now,
         )
-        noteImageDao.insertImage(image)
+        database.withTransaction {
+            noteImageDao.insertImage(image)
+            gemmaNoteProcessingDao.clear(conversationId)
+        }
         image
     }
 
@@ -303,7 +334,10 @@ class DefaultConversationRepository(
             sortOrder = noteImageDao.countForConversation(conversationId),
             createdAt = now,
         )
-        noteImageDao.insertImage(image)
+        database.withTransaction {
+            noteImageDao.insertImage(image)
+            gemmaNoteProcessingDao.clear(conversationId)
+        }
         image
     }
 
@@ -348,6 +382,7 @@ class DefaultConversationRepository(
                 finalNote = cleanNote,
                 title = cleanTitle.ifBlank { "Untitled note" },
             )
+            gemmaNoteProcessingDao.clear(conversationId)
             nounDao.updateVisibleNoteExcerpt(conversationId, visibleNote)
         }
     }
@@ -394,6 +429,7 @@ class DefaultConversationRepository(
                 finalNote = cleanNote,
                 title = cleanTitle.ifBlank { "Untitled note" },
             )
+            gemmaNoteProcessingDao.clear(conversationId)
             suggestions.forEach { nounDao.insertSuggestion(it) }
         }
         return suggestions
@@ -403,7 +439,8 @@ class DefaultConversationRepository(
         val visibleNote = plainNoteText(noteText)
         val memos = memoDao.getMemosForConversation(conversationId)
         val transcripts = memos.mapNotNull { memo ->
-            val existingTranscript = memo.transcript?.takeIf { it.isNotBlank() }
+            val existingTranscript = memo.transcript
+                ?.takeIf { it.isNotBlank() && !it.isLegacyMockTranscript() }
             val transcript = existingTranscript ?: memo.audioPath?.let { audioPath ->
                 runCatching { modelService.transcribe(audioPath) }.getOrNull()
                     ?.trim()
@@ -416,6 +453,11 @@ class DefaultConversationRepository(
             .filterNotNull()
             .joinToString("\n\n")
     }
+
+    private fun String.isLegacyMockTranscript(): Boolean =
+        contains("I remember her hair, her eyes, and the way her smile changed when she came in.", ignoreCase = true) ||
+            contains("I remember being little and feeling proud when I pooped because my mom smiled.", ignoreCase = true) ||
+            contains("When I was little, I sat near the window waiting for my mom to come home.", ignoreCase = true)
 
     private suspend fun safetyForMemo(audioPath: String?, textFallback: String?): SafetyResult =
         runCatching {

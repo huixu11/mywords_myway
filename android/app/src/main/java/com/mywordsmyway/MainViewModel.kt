@@ -1,6 +1,7 @@
 package com.mywordsmyway
 
 import android.net.Uri
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -16,10 +17,14 @@ import com.mywordsmyway.data.local.NoteImageEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
 import com.mywordsmyway.data.local.NounWithLinksEntity
 import com.mywordsmyway.data.local.VoiceMemoEntity
+import com.mywordsmyway.data.model.BorromeanWordCalculationProgress
+import com.mywordsmyway.data.model.BorromeanWordCalculationReport
+import com.mywordsmyway.data.model.BorromeanWordCalculationUiState
 import com.mywordsmyway.data.model.NoteFileAttachment
 import com.mywordsmyway.data.model.StorageUsage
 import com.mywordsmyway.data.model.WeeklyAccess
 import com.mywordsmyway.data.repository.ConversationRepository
+import com.mywordsmyway.data.repository.BorromeanCalculationStateRepository
 import com.mywordsmyway.data.repository.StorageRepository
 import com.mywordsmyway.data.repository.WordRepository
 import com.mywordsmyway.model.ModelService
@@ -30,13 +35,18 @@ import com.mywordsmyway.storage.AudioExportFile
 import com.mywordsmyway.recorder.AndroidAudioRecorder
 import com.mywordsmyway.storage.NotesExporter
 import com.mywordsmyway.storage.TextExportFile
+import com.mywordsmyway.words.BorromeanCalculationService
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 
 data class RecordUiState(
     val isRecording: Boolean = false,
@@ -47,6 +57,7 @@ data class RecordUiState(
 )
 
 class MainViewModel(
+    private val appContext: Context,
     private val conversationRepository: ConversationRepository,
     private val wordRepository: WordRepository,
     private val storageRepository: StorageRepository,
@@ -54,6 +65,7 @@ class MainViewModel(
     private val notesExporter: NotesExporter,
     private val modelService: ModelService,
     private val modelSettingsRepository: ModelSettingsRepository,
+    private val calculationStateRepository: BorromeanCalculationStateRepository,
 ) : ViewModel() {
     val weeklyAccess: StateFlow<WeeklyAccess> = conversationRepository.observeWeeklyAccess()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WeeklyAccess(true))
@@ -70,6 +82,9 @@ class MainViewModel(
     val globalBorromeanWords: StateFlow<List<BorromeanWordEntity>> = wordRepository.observeGlobalBorromeanWords()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val unprocessedGemmaNoteCount: StateFlow<Int> = conversationRepository.observeUnprocessedGemmaNoteCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
     val modelSettings: StateFlow<ModelSettings> = modelSettingsRepository.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ModelSettings())
 
@@ -77,6 +92,50 @@ class MainViewModel(
         private set
 
     val gemmaDownloadProgress = MutableStateFlow(GemmaModelDownloadProgress.Idle)
+    val borromeanCalculationProgress = MutableStateFlow(calculationStateRepository.loadProgress().let { progress ->
+        if (progress.isActive) progress.copy(isActive = false, currentStep = "Previous calculation was interrupted.") else progress
+    })
+    val borromeanCalculationUiState = MutableStateFlow(calculationStateRepository.loadUiState().let { state ->
+        if (state.isRunning) {
+            state.copy(
+                isRunning = false,
+                message = "Previous Gemma calculation was interrupted.",
+                logLines = state.logLines + "Previous calculation was interrupted before completion.",
+                error = "The app or Android stopped the previous calculation before it completed.",
+            )
+        } else {
+            state
+        }
+    })
+    private var borromeanCalculationJob: Job? = null
+
+    init {
+        persistBorromeanCalculationProgress()
+        persistBorromeanCalculationUiState()
+    }
+
+    private fun setBorromeanCalculationUiState(state: BorromeanWordCalculationUiState) {
+        borromeanCalculationUiState.value = state
+        persistBorromeanCalculationUiState()
+    }
+
+    private fun setBorromeanCalculationProgress(progress: BorromeanWordCalculationProgress) {
+        borromeanCalculationProgress.value = progress
+        persistBorromeanCalculationProgress()
+    }
+
+    private fun persistBorromeanCalculationUiState() {
+        calculationStateRepository.saveUiState(borromeanCalculationUiState.value)
+    }
+
+    private fun persistBorromeanCalculationProgress() {
+        calculationStateRepository.saveProgress(borromeanCalculationProgress.value)
+    }
+
+    override fun onCleared() {
+        BorromeanCalculationService.stop(appContext)
+        super.onCleared()
+    }
 
     fun observeCurrentConversation(): Flow<ConversationEntity?> =
         conversationRepository.observeCurrentConversation()
@@ -272,6 +331,198 @@ class MainViewModel(
         wordRepository.saveExtractedBorromeanWords(conversationId, objectKnotId, result.candidateWords)
     }
 
+    fun startBorromeanWordsCalculation() {
+        if (borromeanCalculationJob?.isActive == true || borromeanCalculationUiState.value.isRunning) return
+        setBorromeanCalculationUiState(BorromeanWordCalculationUiState(
+            isRunning = true,
+            message = "Gemma is calculating words from saved notes and voice memos...",
+            logLines = listOf("Started Gemma Words calculation."),
+            error = "",
+        ))
+        BorromeanCalculationService.start(appContext)
+            .onFailure { addBorromeanCalculationLog("Background keep-alive could not start: ${it.message ?: it::class.java.simpleName}") }
+        borromeanCalculationJob = viewModelScope.launch {
+            calculateBorromeanWordsWithGemma()
+                .onSuccess { report ->
+                    val count = report.insertedCount
+                    setBorromeanCalculationUiState(borromeanCalculationUiState.value.copy(
+                        isRunning = false,
+                        message = if (count > 0) {
+                            "Gemma added $count word${if (count == 1) "" else "s"}."
+                        } else {
+                            "Gemma did not add new words. See the calculation log below for the reason."
+                        },
+                        logLines = report.logLines,
+                        error = "",
+                    ))
+                    BorromeanCalculationService.stop(appContext)
+                }
+                .onFailure { throwable ->
+                    if (throwable.isCalculationCancellation()) {
+                        finishCancelledBorromeanCalculation()
+                        return@onFailure
+                    }
+                    val message = throwable.message ?: "Could not calculate words with Gemma."
+                    addBorromeanCalculationLog("Calculation failed: $message")
+                    setBorromeanCalculationUiState(borromeanCalculationUiState.value.copy(
+                        isRunning = false,
+                        message = "Gemma calculation failed.",
+                        error = message,
+                    ))
+                    BorromeanCalculationService.stop(appContext)
+                }
+        }
+    }
+
+    private fun finishCancelledBorromeanCalculation() {
+        BorromeanCalculationService.stop(appContext)
+        setBorromeanCalculationUiState(borromeanCalculationUiState.value.copy(
+            isRunning = false,
+            message = "Gemma calculation stopped. Unprocessed notes can be calculated later.",
+            error = "",
+        ))
+        setBorromeanCalculationProgress(borromeanCalculationProgress.value.copy(
+            isActive = false,
+            currentStep = "Stopped.",
+            estimatedRemainingMillis = null,
+        ))
+    }
+
+    fun stopBorromeanCalculationForBackground() {
+        if (borromeanCalculationJob?.isActive != true && !borromeanCalculationUiState.value.isRunning) return
+        borromeanCalculationJob?.cancel()
+        borromeanCalculationJob = null
+        BorromeanCalculationService.stop(appContext)
+        addBorromeanCalculationLog("Calculation stopped because the app went to the background. Reopen Words and tap Calculate again to restart.")
+        setBorromeanCalculationUiState(borromeanCalculationUiState.value.copy(
+            isRunning = false,
+            message = "Gemma calculation stopped to keep the phone responsive.",
+            error = "Calculation stopped when the app went to the background.",
+        ))
+        setBorromeanCalculationProgress(borromeanCalculationProgress.value.copy(
+            isActive = false,
+            currentStep = "Stopped because app went to background.",
+            estimatedRemainingMillis = null,
+        ))
+    }
+
+    fun clearBorromeanCalculationLog() {
+        if (borromeanCalculationUiState.value.isRunning) return
+        calculationStateRepository.clear()
+        setBorromeanCalculationUiState(BorromeanWordCalculationUiState())
+        setBorromeanCalculationProgress(BorromeanWordCalculationProgress())
+    }
+
+    suspend fun calculateBorromeanWordsWithGemma(): Result<BorromeanWordCalculationReport> = runCatching {
+        var inserted = 0
+        val logs = mutableListOf<String>()
+        val startedAt = TimeSource.Monotonic.markNow()
+        var completedSteps = 0
+        val status = modelService.modelStatus()
+        val notes = conversationRepository.getUnprocessedGemmaNoteContent()
+        val totalSteps = (notes.size * 3).coerceAtLeast(1)
+        fun updateProgress(currentStep: String) {
+            val elapsedMillis = startedAt.elapsedNow().inWholeMilliseconds
+            val remainingMillis = if (completedSteps > 0 && completedSteps < totalSteps) {
+                val averageStepMillis = elapsedMillis / completedSteps.toLong()
+                averageStepMillis * (totalSteps - completedSteps)
+            } else {
+                null
+            }
+            setBorromeanCalculationProgress(BorromeanWordCalculationProgress(
+                isActive = true,
+                completedSteps = completedSteps,
+                totalSteps = totalSteps,
+                currentStep = currentStep,
+                elapsedMillis = elapsedMillis,
+                estimatedRemainingMillis = remainingMillis,
+            ))
+        }
+        fun completeStep(nextStep: String) {
+            completedSteps = (completedSteps + 1).coerceAtMost(totalSteps)
+            updateProgress(nextStep)
+        }
+        updateProgress("Preparing Gemma calculation...")
+        logs.addCalculationLog("Model: $status")
+        logs.addCalculationLog("Found ${notes.size} new note${if (notes.size == 1) "" else "s"} to scan.")
+        if (notes.isEmpty()) {
+            logs.addCalculationLog("No new notes need Gemma. Add or edit a note/audio memo first.")
+            completeStep("No notes to scan.")
+        }
+        notes.forEach { note ->
+            val noteTitle = note.title.ifBlank { "Untitled note" }
+            logs.addCalculationLog("Scanning \"$noteTitle\"...")
+            val targetKnotId = borromeanKnots.value.firstOrNull()?.knot?.id
+            updateProgress("Building source for \"$noteTitle\"...")
+            val source = conversationRepository.buildGemmaExtractionSource(note.id, note.finalNote)
+            completeStep("Source ready for \"$noteTitle\".")
+            if (source.isBlank()) {
+                logs.addCalculationLog("Skipped \"$noteTitle\": no note text or memo transcript was available.")
+                logs.addCalculationLog("If this note only has audio, check that the Gemma model is ready so audio can be transcribed.")
+                conversationRepository.markGemmaNoteProcessed(note.id)
+                completeStep("Skipped Gemma extraction for \"$noteTitle\".")
+                completeStep("Skipped saving for \"$noteTitle\".")
+                return@forEach
+            }
+            logs.addCalculationLog("Built ${source.length} characters of source text.")
+            val existingWords = borromeanKnots.value.flatMap { knot -> knot.words.map { it.text } } +
+                globalBorromeanWords.value.map { it.text }
+            updateProgress("Gemma is extracting words from \"$noteTitle\"...")
+            val result = modelService.extractBorromeanWords(source, existingWords)
+            completeStep("Gemma finished \"$noteTitle\".")
+            if (result.backend.isNotBlank()) {
+                logs.addCalculationLog("Gemma backend: ${result.backend}.")
+            }
+            if (result.diagnostic.isNotBlank()) {
+                logs.addCalculationLog("Gemma detail: ${result.diagnostic}")
+            }
+            logs.addCalculationLog("Gemma returned ${result.candidateWords.size} candidate word${if (result.candidateWords.size == 1) "" else "s"}.")
+            updateProgress("Saving words from \"$noteTitle\"...")
+            val saved = runCatching {
+                wordRepository.saveExtractedBorromeanWords(note.id, targetKnotId, result.candidateWords)
+            }.getOrElse { throwable ->
+                logs.addCalculationLog("Could not save words from \"$noteTitle\": ${throwable.message ?: throwable::class.java.simpleName}")
+                0
+            }
+            completeStep("Saved words from \"$noteTitle\".")
+            inserted += saved
+            logs.addCalculationLog("Saved $saved new word${if (saved == 1) "" else "s"} from \"$noteTitle\".")
+            if (result.candidateWords.isNotEmpty() && saved == 0) {
+                logs.addCalculationLog("No new words were saved because candidates were duplicates, invalid, or already present.")
+            }
+            conversationRepository.markGemmaNoteProcessed(note.id)
+            logs.addCalculationLog("Marked \"$noteTitle\" as processed.")
+        }
+        logs.addCalculationLog("Finished. Added $inserted new word${if (inserted == 1) "" else "s"}.")
+        setBorromeanCalculationProgress(BorromeanWordCalculationProgress(
+            isActive = false,
+            completedSteps = totalSteps,
+            totalSteps = totalSteps,
+            currentStep = "Finished.",
+            elapsedMillis = startedAt.elapsedNow().inWholeMilliseconds,
+            estimatedRemainingMillis = 0L,
+        ))
+        BorromeanWordCalculationReport(insertedCount = inserted, logLines = logs)
+    }.onFailure {
+        val current = borromeanCalculationProgress.value
+        setBorromeanCalculationProgress(current.copy(isActive = false, currentStep = "Calculation failed."))
+    }
+
+    private fun MutableList<String>.addCalculationLog(line: String) {
+        add(line)
+        setBorromeanCalculationUiState(borromeanCalculationUiState.value.copy(logLines = toList()))
+    }
+
+    private fun addBorromeanCalculationLog(line: String) {
+        val logs = borromeanCalculationUiState.value.logLines + line
+        setBorromeanCalculationUiState(borromeanCalculationUiState.value.copy(logLines = logs))
+    }
+
+    private fun Throwable.isCalculationCancellation(): Boolean =
+        this is CancellationException ||
+            message?.contains("StandaloneCoroutine was cancelled", ignoreCase = true) == true ||
+            message?.contains("coroutine was cancelled", ignoreCase = true) == true
+
     suspend fun keepSuggestion(suggestionId: String): Result<Unit> = runCatching {
         wordRepository.keepSuggestion(suggestionId)
     }
@@ -329,6 +580,11 @@ class MainViewModel(
 
     suspend fun deleteBorromeanWord(wordId: String): Result<Unit> = runCatching {
         wordRepository.deleteBorromeanWord(wordId)
+    }
+
+    suspend fun deleteAllBorromeanData(): Result<Unit> = runCatching {
+        wordRepository.deleteAllBorromeanData()
+        conversationRepository.clearGemmaProcessedNotes()
     }
 
     suspend fun linkBorromeanWordToConversation(wordId: String, conversationId: String): Result<Unit> = runCatching {
@@ -391,6 +647,7 @@ class MainViewModel(
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return MainViewModel(
+                appContext = container.appContext,
                 conversationRepository = container.conversationRepository,
                 wordRepository = container.wordRepository,
                 storageRepository = container.storageRepository,
@@ -398,6 +655,7 @@ class MainViewModel(
                 notesExporter = container.notesExporter,
                 modelService = container.modelService,
                 modelSettingsRepository = container.modelSettingsRepository,
+                calculationStateRepository = container.borromeanCalculationStateRepository,
             ) as T
         }
     }

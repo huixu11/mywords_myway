@@ -44,6 +44,7 @@ interface WordRepository {
     )
     suspend fun updateBorromeanWordWeights(wordId: String, emotionalWeight: Int, importanceWeight: Int, desireWeight: Int)
     suspend fun deleteBorromeanWord(wordId: String)
+    suspend fun deleteAllBorromeanData()
     suspend fun linkBorromeanWordToConversation(wordId: String, conversationId: String)
     suspend fun saveExtractedBorromeanWords(conversationId: String, objectKnotId: String?, candidates: List<BorromeanWordCandidate>): Int
 }

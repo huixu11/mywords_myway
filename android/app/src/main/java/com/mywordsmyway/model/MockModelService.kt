@@ -44,15 +44,7 @@ class MockModelService : ModelService {
         "email", "call", "apartment",
     )
 
-    override suspend fun transcribe(audioPath: String): String = withContext(Dispatchers.Default) {
-        "Today I kept checking my phone after someone disappeared. " +
-            "I do not know why I wait when someone disappears. " +
-            "When I was little, I sat near the window waiting for my mom to come home. " +
-            "I remember her hair, her eyes, and the way her smile changed when she came in. " +
-            "I remember being little and feeling proud when I pooped because my mom smiled. " +
-            "The room was quiet. There was light outside. " +
-            "I thought if I was quiet and good, she would come back happy."
-    }
+    override suspend fun transcribe(audioPath: String): String = ""
 
     override suspend fun safetyCheck(text: String): SafetyResult = withContext(Dispatchers.Default) {
         val lowered = text.lowercase()

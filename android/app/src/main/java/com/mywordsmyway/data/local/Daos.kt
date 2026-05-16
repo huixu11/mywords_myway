@@ -137,11 +137,75 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations WHERE TRIM(finalNote) != '' ORDER BY createdAt DESC")
     suspend fun getAllNotes(): List<ConversationEntity>
 
+    @Query(
+        """
+        SELECT conversations.*
+        FROM conversations
+        LEFT JOIN voice_memos ON voice_memos.conversationId = conversations.id
+        LEFT JOIN note_images ON note_images.conversationId = conversations.id
+        GROUP BY conversations.id
+        HAVING TRIM(finalNote) != ''
+          OR COUNT(DISTINCT voice_memos.id) > 0
+          OR COUNT(DISTINCT note_images.id) > 0
+        ORDER BY conversations.createdAt DESC
+        """,
+    )
+    suspend fun getAllNoteContent(): List<ConversationEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM (
+            SELECT conversations.id
+            FROM conversations
+            LEFT JOIN voice_memos ON voice_memos.conversationId = conversations.id
+            LEFT JOIN note_images ON note_images.conversationId = conversations.id
+            LEFT JOIN gemma_note_processing ON gemma_note_processing.conversationId = conversations.id
+            AND gemma_note_processing.status = 'processed'
+            WHERE gemma_note_processing.conversationId IS NULL
+            GROUP BY conversations.id
+            HAVING TRIM(finalNote) != ''
+              OR COUNT(DISTINCT voice_memos.id) > 0
+              OR COUNT(DISTINCT note_images.id) > 0
+        )
+        """,
+    )
+    fun observeUnprocessedGemmaNoteCount(): Flow<Int>
+
+    @Query(
+        """
+        SELECT conversations.*
+        FROM conversations
+        LEFT JOIN voice_memos ON voice_memos.conversationId = conversations.id
+        LEFT JOIN note_images ON note_images.conversationId = conversations.id
+        LEFT JOIN gemma_note_processing ON gemma_note_processing.conversationId = conversations.id
+            AND gemma_note_processing.status = 'processed'
+        WHERE gemma_note_processing.conversationId IS NULL
+        GROUP BY conversations.id
+        HAVING TRIM(finalNote) != ''
+          OR COUNT(DISTINCT voice_memos.id) > 0
+          OR COUNT(DISTINCT note_images.id) > 0
+        ORDER BY conversations.createdAt DESC
+        """,
+    )
+    suspend fun getUnprocessedGemmaNoteContent(): List<ConversationEntity>
+
     @Query("DELETE FROM conversations WHERE id = :conversationId")
     suspend fun deleteConversation(conversationId: String)
 
     @Query("DELETE FROM conversations")
     suspend fun deleteAllConversations()
+}
+
+@Dao
+interface GemmaNoteProcessingDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(processing: GemmaNoteProcessingEntity)
+
+    @Query("DELETE FROM gemma_note_processing WHERE conversationId = :conversationId")
+    suspend fun clear(conversationId: String)
+
+    @Query("DELETE FROM gemma_note_processing")
+    suspend fun clearAll()
 }
 
 @Dao
@@ -347,6 +411,18 @@ interface BorromeanDao {
 
     @Query("DELETE FROM borromean_words WHERE id = :wordId")
     suspend fun deleteWord(wordId: String)
+
+    @Query("DELETE FROM borromean_words")
+    suspend fun deleteAllWords()
+
+    @Query("DELETE FROM borromean_knots")
+    suspend fun deleteAllKnots()
+
+    @Query("DELETE FROM borromean_knots WHERE title IN (:titles)")
+    suspend fun deleteKnotsByTitle(titles: List<String>)
+
+    @Query("DELETE FROM borromean_words WHERE source = 'manual' AND conversationId IS NULL AND sourceConversationId IS NULL AND text IN (:texts)")
+    suspend fun deleteManualWordsByText(texts: List<String>)
 }
 
 @Dao

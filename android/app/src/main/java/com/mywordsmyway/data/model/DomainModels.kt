@@ -59,7 +59,37 @@ data class BorromeanWordCandidate(
 
 data class BorromeanExtractionResult(
     val candidateWords: List<BorromeanWordCandidate>,
+    val diagnostic: String = "",
+    val backend: String = "",
 )
+
+data class BorromeanWordCalculationReport(
+    val insertedCount: Int,
+    val logLines: List<String>,
+)
+
+data class BorromeanWordCalculationUiState(
+    val isRunning: Boolean = false,
+    val message: String = "",
+    val logLines: List<String> = emptyList(),
+    val error: String = "",
+)
+
+data class BorromeanWordCalculationProgress(
+    val isActive: Boolean = false,
+    val completedSteps: Int = 0,
+    val totalSteps: Int = 0,
+    val currentStep: String = "",
+    val elapsedMillis: Long = 0L,
+    val estimatedRemainingMillis: Long? = null,
+) {
+    val fraction: Float
+        get() = if (totalSteps > 0) {
+            completedSteps.toFloat() / totalSteps.toFloat()
+        } else {
+            0f
+        }.coerceIn(0f, 1f)
+}
 
 data class StorageUsage(
     val usedBytes: Long,

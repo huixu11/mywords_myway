@@ -174,12 +174,13 @@ import com.mywordsmyway.data.local.NounEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
 import com.mywordsmyway.data.local.NounWithLinksEntity
 import com.mywordsmyway.data.local.VoiceMemoEntity
+import com.mywordsmyway.data.model.BorromeanWordCalculationProgress
 import com.mywordsmyway.data.model.LISTENING_QUESTION
 import com.mywordsmyway.data.model.NoteFileAttachment
 import com.mywordsmyway.data.model.SUPPORT_MESSAGE
 import com.mywordsmyway.model.GemmaModelDownloadProgress
-import com.mywordsmyway.model.GEMMA_4_E4B_MODEL_NAME
-import com.mywordsmyway.model.GEMMA_4_E4B_MODEL_PAGE_URL
+import com.mywordsmyway.model.GEMMA_4_E2B_MODEL_NAME
+import com.mywordsmyway.model.GEMMA_4_E2B_MODEL_PAGE_URL
 import com.mywordsmyway.storage.AudioExportFile
 import com.mywordsmyway.storage.TextExportFile
 import com.mywordsmyway.storage.plainNoteText
@@ -639,16 +640,7 @@ fun WriteNoteScreen(
                 .onSuccess {
                     error = ""
                     savedNotice = "Saved"
-                    val targetKnotId = viewModel.borromeanKnots.value.firstOrNull()?.knot?.id
-                    viewModel.extractBorromeanWords(conversationId, noteField.text, targetKnotId)
-                        .onSuccess { count ->
-                            gemmaNotice = if (count > 0) {
-                                "Gemma extracted $count word${if (count == 1) "" else "s"}."
-                            } else {
-                                ""
-                            }
-                        }
-                        .onFailure { gemmaNotice = it.message ?: "Gemma extraction could not run." }
+                    gemmaNotice = ""
                     if (navigateAfterSave) onSaved()
                 }
                 .onFailure {
@@ -1155,6 +1147,9 @@ fun WordsScreen(
 ) {
     val knots by viewModel.borromeanKnots.collectAsState()
     val globalWords by viewModel.globalBorromeanWords.collectAsState()
+    val calculationProgress by viewModel.borromeanCalculationProgress.collectAsState()
+    val calculationUiState by viewModel.borromeanCalculationUiState.collectAsState()
+    val unprocessedGemmaNoteCount by viewModel.unprocessedGemmaNoteCount.collectAsState()
     val scope = rememberCoroutineScope()
     var selectedKnotId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedRegister by rememberSaveable { mutableStateOf(BORROMEAN_REGISTER_REAL) }
@@ -1173,9 +1168,14 @@ fun WordsScreen(
     var noteSearchQuery by rememberSaveable { mutableStateOf("") }
     var knotPendingDelete by remember { mutableStateOf<BorromeanKnotWithWords?>(null) }
     var wordPendingDelete by remember { mutableStateOf<BorromeanWordEntity?>(null) }
+    var showDeleteWordsDialog by rememberSaveable { mutableStateOf(false) }
+    var showClearCalculationLogDialog by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf("") }
     val activeKnot = remember(knots, selectedKnotId) {
         knots.firstOrNull { it.knot.id == selectedKnotId } ?: knots.firstOrNull()
+    }
+    val otherKnots = remember(knots, activeKnot?.knot?.id) {
+        knots.filter { it.knot.id != activeKnot?.knot?.id }
     }
     LaunchedEffect(activeKnot?.knot?.id) {
         if (activeKnot != null) selectedKnotId = activeKnot.knot.id
@@ -1273,12 +1273,62 @@ fun WordsScreen(
                 "The topological mind model introduced by Jacques Lacan.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = {
+                    error = ""
+                    viewModel.startBorromeanWordsCalculation()
+                },
+                enabled = !calculationUiState.isRunning && unprocessedGemmaNoteCount > 0,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    when {
+                        calculationUiState.isRunning -> "Calculating with Gemma..."
+                        unprocessedGemmaNoteCount > 0 -> "Calculate $unprocessedGemmaNoteCount unprocessed note${if (unprocessedGemmaNoteCount == 1) "" else "s"} with Gemma"
+                        else -> "All notes processed by Gemma"
+                    },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { showDeleteWordsDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Delete Words data")
+            }
+            if (calculationUiState.message.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(calculationUiState.message, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+            if (calculationUiState.error.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                ErrorText(calculationUiState.error)
+            }
+            if (calculationProgress.isActive || calculationProgress.totalSteps > 0) {
+                Spacer(Modifier.height(8.dp))
+                GemmaCalculationProgressBar(progress = calculationProgress)
+            }
+            if (calculationUiState.logLines.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                if (calculationUiState.isRunning) {
+                    GemmaCalculationLog(logLines = calculationUiState.logLines)
+                } else {
+                    SwipeToDeleteRow(
+                        contentDescription = "Delete calculation log",
+                        shape = RoundedCornerShape(12.dp),
+                        onDelete = { showClearCalculationLogDialog = true },
+                    ) {
+                        GemmaCalculationLog(logLines = calculationUiState.logLines)
+                    }
+                }
+            }
             Spacer(Modifier.height(18.dp))
             if (activeKnot == null) {
                 Text("No Gemma-extracted Borromean knots yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Set up the Gemma 4 E4B model in Privacy, then save notes or voice memos. Gemma will extract object a words and create knots here.",
+                    "Set up the Gemma 4 E2B model in Privacy, then save notes or voice memos. Gemma will extract object a words and create knots here.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -1328,18 +1378,20 @@ fun WordsScreen(
             )
             Spacer(Modifier.height(18.dp))
             ErrorText(error)
-            Spacer(Modifier.height(18.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Other possible knots", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                if (previousKnotIds.isNotEmpty()) {
-                    TextButton(onClick = { selectedKnotId = previousKnotIds.removeAt(previousKnotIds.lastIndex) }) {
-                        Text("Previous")
+            if (otherKnots.isNotEmpty()) {
+                Spacer(Modifier.height(18.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Other possible knots", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    if (previousKnotIds.isNotEmpty()) {
+                        TextButton(onClick = { selectedKnotId = previousKnotIds.removeAt(previousKnotIds.lastIndex) }) {
+                            Text("Previous")
+                        }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
             }
-            Spacer(Modifier.height(8.dp))
         }
-        items(knots.filter { it.knot.id != activeKnot?.knot?.id }, key = { it.knot.id }) { knot ->
+        items(otherKnots, key = { it.knot.id }) { knot ->
             SwipeToDeleteRow(
                 contentDescription = "Delete knot",
                 shape = RoundedCornerShape(20.dp),
@@ -1483,6 +1535,126 @@ fun WordsScreen(
                 }
             },
         )
+    }
+    if (showDeleteWordsDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteWordsDialog = false },
+            title = { Text("Delete Words data?") },
+            text = {
+                Text(
+                    "This deletes all Borromean knots and all Words-page word lists from this device. Notes, audio, and images are kept. Gemma processing history is also cleared, so all notes can be recalculated afterward.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteWordsDialog = false
+                        scope.launch {
+                            viewModel.deleteAllBorromeanData()
+                                .onSuccess {
+                                    selectedKnotId = null
+                                    previousKnotIds.clear()
+                                    error = ""
+                                }
+                                .onFailure { error = it.message ?: "Could not delete Words data." }
+                        }
+                    },
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteWordsDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+    if (showClearCalculationLogDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearCalculationLogDialog = false },
+            title = { Text("Delete calculation log?") },
+            text = {
+                Text(
+                    "This clears the saved Gemma calculation log and progress status. It does not delete notes or extracted words.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearCalculationLogDialog = false
+                        viewModel.clearBorromeanCalculationLog()
+                    },
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCalculationLogDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun GemmaCalculationProgressBar(progress: BorromeanWordCalculationProgress) {
+    val percent = (progress.fraction * 100f).toInt().coerceIn(0, 100)
+    val remainingText = progress.estimatedRemainingMillis?.let { millis ->
+        if (progress.isActive) "About ${formatShortDuration(millis)} left" else "Done"
+    } ?: if (progress.isActive) {
+        "Estimating time..."
+    } else {
+        "Done"
+    }
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Gemma progress", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("$percent%", style = MaterialTheme.typography.labelMedium)
+            }
+            LinearProgressIndicator(
+                progress = { progress.fraction },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                progress.currentStep.ifBlank { "Preparing..." },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "Elapsed ${formatShortDuration(progress.elapsedMillis)} - $remainingText",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GemmaCalculationLog(logLines: List<String>) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Calculation log", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            logLines.forEach { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
     }
 }
 
@@ -2495,20 +2667,20 @@ fun PrivacyScreen(
     var modelStatus by rememberSaveable { mutableStateOf("") }
     var modelSetupMessage by rememberSaveable { mutableStateOf("") }
     val isGemmaDownloadActive = gemmaDownloadProgress.isActive
-    val isGemmaModelReady = modelSettings.isLoadable
+    val isGemmaModelReady = modelSettings.isExpectedGemmaModel
     val isGemmaSetupLocked = isGemmaDownloadActive || isGemmaModelReady
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             scope.launch {
-                modelSetupMessage = "Importing Gemma 4 E4B model into app storage..."
+                modelSetupMessage = "Importing Gemma 4 E2B model into app storage..."
                 viewModel.importGemmaModel(uri)
                     .onSuccess { path ->
                         modelPath = path
                         modelStatus = viewModel.gemmaModelStatus().getOrDefault("")
-                        modelSetupMessage = "Gemma 4 E4B model imported."
+                        modelSetupMessage = "Gemma 4 E2B model imported."
                     }
                     .onFailure { error ->
-                        modelSetupMessage = error.message ?: "Could not import Gemma 4 E4B model."
+                        modelSetupMessage = error.message ?: "Could not import Gemma 4 E2B model."
                     }
             }
         }
@@ -2522,11 +2694,11 @@ fun PrivacyScreen(
         when (gemmaDownloadProgress.status) {
             GemmaModelDownloadProgress.Status.Successful -> {
                 modelStatus = viewModel.gemmaModelStatus().getOrDefault("")
-                modelSetupMessage = "Gemma 4 E4B is downloaded and imported automatically. The app will use it for extraction."
+                modelSetupMessage = "Gemma 4 E2B is downloaded and imported automatically. The app will use it for extraction."
             }
             GemmaModelDownloadProgress.Status.Failed -> {
                 modelSetupMessage = gemmaDownloadProgress.reason.ifBlank {
-                    "Gemma 4 E4B download failed. Open the download page, accept the license if needed, then import the .litertlm file."
+                    "Gemma 4 E2B download failed. Open the download page, accept the license if needed, then import the .litertlm file."
                 }
             }
             else -> Unit
@@ -2581,24 +2753,24 @@ fun PrivacyScreen(
             Text("Gemma on-device model", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Use Gemma 4 E4B on this device to extract object a words, personally important words, and what I truly want from notes and voice memos. Tap Download to this app once. When the download finishes, the model is imported automatically into private app storage.",
+                "Use Gemma 4 E2B on this device to extract object a words, personally important words, and what I truly want from notes and voice memos. E2B is smaller than E4B and is a better fit for Pixel 6a. Tap Download to this app once. When the download finishes, the model is imported automatically into private app storage.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Official model file: $GEMMA_4_E4B_MODEL_NAME",
+                "Official model file: $GEMMA_4_E2B_MODEL_NAME",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
-                onClick = { openUrl(context, GEMMA_4_E4B_MODEL_PAGE_URL) },
+                onClick = { openUrl(context, GEMMA_4_E2B_MODEL_PAGE_URL) },
                 enabled = !isGemmaSetupLocked,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Default.OpenInBrowser, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Open Gemma 4 E4B download page")
+                Text("Open Gemma 4 E2B download page")
             }
             Spacer(Modifier.height(8.dp))
             Button(
@@ -2607,10 +2779,10 @@ fun PrivacyScreen(
                         viewModel.startGemmaModelDownload()
                             .onSuccess {
                                 modelStatus = viewModel.gemmaModelStatus().getOrDefault("")
-                                modelSetupMessage = "Downloading Gemma 4 E4B. Keep this screen open to see progress."
+                                modelSetupMessage = "Downloading Gemma 4 E2B. Keep this screen open to see progress."
                             }
                             .onFailure { error ->
-                                modelSetupMessage = error.message ?: "Could not start Gemma 4 E4B download."
+                                modelSetupMessage = error.message ?: "Could not start Gemma 4 E2B download."
                             }
                     }
                 },
@@ -2619,8 +2791,8 @@ fun PrivacyScreen(
             ) {
                 Text(
                     when {
-                        isGemmaDownloadActive -> "Downloading Gemma 4 E4B..."
-                        isGemmaModelReady -> "Gemma 4 E4B ready"
+                        isGemmaDownloadActive -> "Downloading Gemma 4 E2B..."
+                        isGemmaModelReady -> "Gemma 4 E2B ready"
                         else -> "Download to this app"
                     },
                 )
@@ -2735,15 +2907,15 @@ fun PrivacyScreen(
 private fun GemmaDownloadProgressView(progress: GemmaModelDownloadProgress) {
     val percent = progress.percent
     val title = when (progress.status) {
-        GemmaModelDownloadProgress.Status.Pending -> "Waiting to download Gemma 4 E4B"
+        GemmaModelDownloadProgress.Status.Pending -> "Waiting to download Gemma 4 E2B"
         GemmaModelDownloadProgress.Status.Running -> if (percent != null) {
-            "Downloading Gemma 4 E4B: $percent%"
+            "Downloading Gemma 4 E2B: $percent%"
         } else {
-            "Downloading Gemma 4 E4B"
+            "Downloading Gemma 4 E2B"
         }
-        GemmaModelDownloadProgress.Status.Successful -> "Gemma 4 E4B ready"
-        GemmaModelDownloadProgress.Status.Failed -> "Gemma 4 E4B download failed"
-        GemmaModelDownloadProgress.Status.Idle -> "Gemma 4 E4B download"
+        GemmaModelDownloadProgress.Status.Successful -> "Gemma 4 E2B ready"
+        GemmaModelDownloadProgress.Status.Failed -> "Gemma 4 E2B download failed"
+        GemmaModelDownloadProgress.Status.Idle -> "Gemma 4 E2B download"
     }
     Surface(
         color = MaterialTheme.colorScheme.secondaryContainer,
@@ -5538,6 +5710,15 @@ private fun formatDuration(durationMillis: Long?): String {
     val minutes = totalSeconds / 60L
     val seconds = totalSeconds % 60L
     return if (seconds == 0L) "${minutes} min" else "%d:%02d".format(minutes, seconds)
+}
+
+private fun formatShortDuration(durationMillis: Long): String {
+    if (durationMillis <= 0L) return "0s"
+    val totalSeconds = ((durationMillis + 500L) / 1000L).coerceAtLeast(1L)
+    if (totalSeconds < 60L) return "${totalSeconds}s"
+    val minutes = totalSeconds / 60L
+    val seconds = totalSeconds % 60L
+    return if (seconds == 0L) "${minutes}m" else "${minutes}m ${seconds}s"
 }
 
 private fun formatBytes(bytes: Long): String {

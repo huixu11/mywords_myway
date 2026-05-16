@@ -237,6 +237,13 @@ class DefaultWordRepository(
         borromeanDao.deleteWord(wordId)
     }
 
+    override suspend fun deleteAllBorromeanData() {
+        database.withTransaction {
+            borromeanDao.deleteAllWords()
+            borromeanDao.deleteAllKnots()
+        }
+    }
+
     override suspend fun linkBorromeanWordToConversation(wordId: String, conversationId: String) {
         borromeanDao.linkWordToConversation(wordId, conversationId, clock.instant())
     }
@@ -256,14 +263,14 @@ class DefaultWordRepository(
                 borromeanDao.insertKnot(
                     BorromeanKnotEntity(
                         id = knotId,
-                        title = note?.title
+                        title = "Gemma extracted Borromean knot",
+                        description = note?.title
                             ?.trim()
                             ?.takeIf { it.isNotEmpty() && it != "Untitled reflection" && it != "Untitled note" }
-                            ?.let { "Gemma: $it" }
-                            ?: "Gemma extracted Borromean knot",
-                        description = "Object a words extracted from a saved note and its voice memos.",
+                            ?.let { "Extracted from saved note: $it" }
+                            ?: "Extracted from saved notes and voice memos.",
                         personName = null,
-                        theoryNote = "The knot is generated from Gemma-extracted object a words in the user's own notes.",
+                        theoryNote = "The knot is generated from concrete nouns connected to early scenes with mother.",
                         createdAt = now,
                         updatedAt = now,
                         sortOrder = borromeanDao.countKnots(),
