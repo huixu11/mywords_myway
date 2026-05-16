@@ -34,5 +34,5 @@ A private voice-reflection app that uses Gemma 4 to extract concrete nouns from 
 
 - Most AI assistants speak for the user. My Words, My Way helps the user speak until their own words become powerful.
 - The model does not decide meaning. It only preserves possible nouns from the user’s speech and links kept nouns to the user’s own notes.
-- One free conversation per week keeps access open; paid conversations add reflection friction so users take their words seriously.
+- Users can always create notes and voice reflections. There is no paywall.
 - AI restraint is the feature.

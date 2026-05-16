@@ -2,36 +2,17 @@
 
 These are low-fidelity Compose mockups. The visual style should be quiet, minimal, and focused on the user's words.
 
-## 1. Weekly Access
+## 1. Start / Record
 
 ```text
 My Words, My Way
 
-1 free conversation this week
+Create a note or voice reflection anytime
 
 The app asks one question and preserves your own words.
+There is no paywall.
 
-[ Start free conversation ]
-
-Small text:
-After your weekly free conversation, a paid conversation asks you to pause
-and take your words seriously. This app is not psychoanalysis.
-```
-
-After free conversation is used:
-
-```text
-My Words, My Way
-
-This week's free conversation has been used.
-
-Paid conversation
-
-Paying is a boundary. It asks you to slow down and write carefully.
-It does not make this app psychoanalysis.
-
-[ Continue with paid conversation ]
-[ Not now ]
+[ Start conversation ]
 ```
 
 ## 2. Record

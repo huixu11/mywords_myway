@@ -44,11 +44,9 @@ This app comes from my own Lacanian psychoanalysis experience, professional Laca
 - The app requires a user-written note before Gemma noun suggestions are generated, so each session ends with the user's own most important understanding at that moment.
 - Gemma 4 extracted words are meant to help the user notice how current life can lead into memories of early time with their mother, not to explain or diagnose the user.
 
-## Payment and Storage Boundaries
+## Access and Storage Boundaries
 
-- Each local user gets one free conversation per week.
-- After the free weekly conversation, the prototype requires a paid-conversation acknowledgement before starting another session. A production build would replace this acknowledgement with a real payment provider.
-- The payment is part of the product's reflection design: paying a small amount asks the user to pause, take the conversation seriously, and write careful notes about what they understood.
+- Users can always create notes and voice reflections. There is no paywall.
 - When local app data grows beyond 1 GB, the app deletes the oldest voice memo audio and hidden transcript text until storage is under the limit.
 - User-written notes, confirmed nouns, and note links are kept visible unless the user deletes them.
 

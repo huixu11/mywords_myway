@@ -27,12 +27,8 @@
   <div class="card">
     <h2>1. Record / Demo Transcript</h2>
     <p><b>Prompt:</b> What does that make you think about?</p>
-    <p class="small">One conversation is free each week. After that, a paid conversation acknowledgement is required in this prototype.</p>
+    <p class="small">Users can always create notes and voice reflections. There is no paywall.</p>
     <textarea id="memo" rows="5">Today I kept checking my phone after someone disappeared. That made me think about when I was little, sitting near the window waiting for my mom to come home. The room was quiet. There was light outside. I thought if I was quiet and good, she would come back happy.</textarea>
-    <label class="checkrow">
-      <input id="paidConversation" type="checkbox"/>
-      <span>I acknowledge this is a paid conversation after my weekly free conversation.</span>
-    </label>
     <button class="primary" onclick="startSession()">Start session</button>
     <button class="muted" onclick="addMemo()">Add memo</button>
     <p id="sessionStatus" class="small"></p>
@@ -72,11 +68,10 @@ let conversationId = null;
 
 async function startSession() {
   const fd = new FormData();
-  fd.append('payment_acknowledged', document.getElementById('paidConversation').checked ? 'true' : 'false');
   const r = await fetch('/api/conversations', { method: 'POST', body: fd });
   if (!r.ok) {
     const err = await r.json();
-    document.getElementById('sessionStatus').innerText = err.detail?.message || 'Payment acknowledgement is required to start another conversation this week.';
+    document.getElementById('sessionStatus').innerText = err.detail?.message || 'Could not start session.';
     conversationId = null;
     return;
   }

@@ -13,7 +13,6 @@ Room database:
 - noun_links
 - noun_suggestions
 - safety_events
-- payments
 
 File storage:
 - audio memo files
@@ -31,8 +30,8 @@ data class ConversationEntity(
     val title: String,
     val finalNote: String,
     val safetyStatus: String,
-    val paymentStatus: String,
-    val isFreeWeekly: Boolean
+    val folderId: String?,
+    val isLocked: Boolean
 )
 ```
 
@@ -145,20 +144,6 @@ data class SafetyEventEntity(
 )
 ```
 
-### PaymentEntity
-
-```kotlin
-@Entity(tableName = "payments")
-data class PaymentEntity(
-    @PrimaryKey val id: String,
-    val conversationId: String?,
-    val status: String,
-    val productId: String,
-    val purchaseToken: String?,
-    val createdAt: Instant
-)
-```
-
 ## Scene Types
 
 ```text
@@ -175,7 +160,7 @@ unclear
 ```kotlin
 interface ConversationRepository {
     fun observeCurrentConversation(): Flow<Conversation?>
-    suspend fun startConversation(paymentAcknowledged: Boolean): StartConversationResult
+    suspend fun startConversation(folderId: String? = null): StartConversationResult
     suspend fun addMemo(conversationId: String, audioPath: String?, textFallback: String?)
     suspend fun finishConversation(conversationId: String, finalNote: String): List<NounSuggestion>
 }
@@ -212,16 +197,7 @@ When local app data is larger than 1 GB:
 
 This matches the product boundary: hidden data can be cleaned, but the user's own notes remain the primary visible record.
 
-## Weekly Free Conversation Rule
+## Access Rule
 
-Use DataStore or a Room query:
-
-```text
-currentWeekStart = Monday 00:00 local time
-freeUsed = exists conversation where isFreeWeekly = true and createdAt >= currentWeekStart
-```
-
-If `freeUsed == false`, create a free conversation.
-
-If `freeUsed == true`, require Play Billing purchase or prototype acknowledgement before creating another conversation.
+Users can always create notes and voice reflections. There is no paywall.
 

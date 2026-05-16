@@ -24,7 +24,6 @@ The Android app should keep the core story from `KAGGLE_WRITEUP.md`:
 - Settings: DataStore
 - Audio recording: Android media APIs
 - Background work: WorkManager
-- Billing: Google Play Billing
 - Dependency injection: Hilt or lightweight manual injection
 - Async: Kotlin coroutines and Flow
 
@@ -54,7 +53,7 @@ The Android app should own:
 - notes;
 - noun review;
 - search;
-- weekly free conversation and paid acknowledgement;
+- always-available note and voice reflection creation;
 - 1 GB cleanup policy.
 
 ## Model Integration Phases
@@ -88,10 +87,10 @@ The UI and database should not depend on where Gemma runs.
 
 ## Core Screens
 
-1. **Start / Weekly Access**
-   - Shows whether this week's free conversation is available.
-   - If used, asks for paid conversation confirmation.
-   - Explains that payment is reflection friction, not psychoanalysis.
+1. **Start / Record**
+   - Lets the user start a voice reflection at any time.
+   - Explains that users can always create notes and voice reflections.
+   - Explains that the app preserves words but is not psychoanalysis.
 
 2. **Record**
    - Large record button.
@@ -126,8 +125,8 @@ The UI and database should not depend on where Gemma runs.
 
 ## Key Product Rules
 
-- One free conversation per user per week.
-- Paid conversation required after weekly free use.
+- Users can always create notes and voice reflections.
+- No paywall.
 - Conversation can continue during safety risk; the app adds support and resources.
 - App still asks the same listening question.
 - App is not therapy and not psychoanalysis.
@@ -145,9 +144,8 @@ The UI and database should not depend on where Gemma runs.
 5. Add mock Gemma noun extraction.
 6. Add review suggestions and note-linked nouns.
 7. Add search and notes-only export.
-8. Add weekly free conversation gate.
+8. Keep note and voice reflection creation always available.
 9. Add storage cleanup worker.
 10. Add optional HTTP model service.
-11. Add Play Billing for paid conversations.
-12. Package demo APK.
+11. Package demo APK.
 

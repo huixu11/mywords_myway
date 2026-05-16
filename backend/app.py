@@ -152,39 +152,21 @@ def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 @app.post("/api/conversations")
-def create_conversation(payment_acknowledged: bool = Form(default=False)):
+def create_conversation():
     cid = str(uuid.uuid4())
-    week_start = _current_week_start()
     with connect() as conn:
-        free_used = conn.execute(
-            "SELECT COUNT(*) AS count FROM conversations WHERE is_free_weekly=1 AND created_at >= ?",
-            (week_start,)
-        ).fetchone()["count"] > 0
-        is_free_weekly = 0 if free_used else 1
-        payment_status = "free_weekly"
-        if free_used:
-            if not payment_acknowledged:
-                raise HTTPException(
-                    status_code=402,
-                    detail={
-                        "message": "You have used this week's free conversation. Paid conversations help you pause and take your words seriously before starting.",
-                        "free_conversation_available": False,
-                        "payment_required": True,
-                    }
-                )
-            payment_status = "paid_acknowledged"
         conn.execute(
             """INSERT INTO conversations
                (id, created_at, title, user_note, payment_status, is_free_weekly)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (cid, now(), "Untitled reflection", "", payment_status, is_free_weekly)
+            (cid, now(), "Untitled reflection", "", "free", 1)
         )
         conn.commit()
     return {
         "conversation_id": cid,
         "question": "What does that make you think about?",
-        "payment_status": payment_status,
-        "free_conversation_available": bool(is_free_weekly),
+        "payment_status": "free",
+        "free_conversation_available": True,
     }
 
 @app.post("/api/conversations/{conversation_id}/memos")
