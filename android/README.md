@@ -8,13 +8,12 @@ Native Android implementation of the local-first app described in:
 
 The default model implementation is `MockModelService`, so the full product flow can run without a Gemma server:
 
-1. weekly access gate
-2. voice memo recording
-3. required user-written note
-4. noun suggestion review
-5. saved words linked to user notes
-6. notes-only export
-7. local storage cleanup
+1. always-available note and voice memo creation
+2. required user-written note
+3. word suggestion review
+4. saved words linked to user notes
+5. notes-only export
+6. local storage cleanup
 
 Open this directory in Android Studio and sync the Gradle project. This project is configured for the installed Android 16 QPR2 SDK (`36.1`) and AGP `8.13.0`.
 

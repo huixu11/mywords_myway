@@ -22,7 +22,6 @@ import com.mywordsmyway.data.model.BorromeanWordCalculationReport
 import com.mywordsmyway.data.model.BorromeanWordCalculationUiState
 import com.mywordsmyway.data.model.NoteFileAttachment
 import com.mywordsmyway.data.model.StorageUsage
-import com.mywordsmyway.data.model.WeeklyAccess
 import com.mywordsmyway.data.repository.ConversationRepository
 import com.mywordsmyway.data.repository.BorromeanCalculationStateRepository
 import com.mywordsmyway.data.repository.StorageRepository
@@ -67,9 +66,6 @@ class MainViewModel(
     private val modelSettingsRepository: ModelSettingsRepository,
     private val calculationStateRepository: BorromeanCalculationStateRepository,
 ) : ViewModel() {
-    val weeklyAccess: StateFlow<WeeklyAccess> = conversationRepository.observeWeeklyAccess()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WeeklyAccess(true))
-
     val storageUsage: StateFlow<StorageUsage> = storageRepository.observeStorageUsage()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StorageUsage(0L, 1_073_741_824L))
 
@@ -164,13 +160,12 @@ class MainViewModel(
     fun observeNotesInFolder(folderId: String?, startDate: String, endDate: String): Flow<List<ConversationEntity>> =
         conversationRepository.observeNotesInFolder(folderId, startDate, endDate)
 
-    suspend fun startConversation(paymentAcknowledged: Boolean): Result<String> = runCatching {
-        conversationRepository.startConversation(paymentAcknowledged).conversation.id
+    suspend fun startConversation(): Result<String> = runCatching {
+        conversationRepository.startConversation().conversation.id
     }
 
     suspend fun startNote(folderId: String? = null): Result<String> = runCatching {
-        val needsAcknowledgement = !weeklyAccess.value.freeConversationAvailable
-        conversationRepository.startConversation(paymentAcknowledged = needsAcknowledgement, folderId = folderId).conversation.id
+        conversationRepository.startConversation(folderId = folderId).conversation.id
     }
 
     suspend fun createNoteFolder(name: String): Result<Unit> = runCatching {

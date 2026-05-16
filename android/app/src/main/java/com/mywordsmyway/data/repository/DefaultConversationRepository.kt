@@ -13,7 +13,6 @@ import com.mywordsmyway.data.local.NoteImageEntity
 import com.mywordsmyway.data.local.NoteFolderEntity
 import com.mywordsmyway.data.local.NoteFolderWithCount
 import com.mywordsmyway.data.local.NounSuggestionEntity
-import com.mywordsmyway.data.local.PaymentEntity
 import com.mywordsmyway.data.local.SafetyEventEntity
 import com.mywordsmyway.data.local.VoiceMemoEntity
 import com.mywordsmyway.data.model.AddMemoResult
@@ -23,7 +22,6 @@ import com.mywordsmyway.data.model.NounExtractionResult
 import com.mywordsmyway.data.model.SUPPORT_MESSAGE
 import com.mywordsmyway.data.model.SafetyResult
 import com.mywordsmyway.data.model.StartConversationResult
-import com.mywordsmyway.data.model.WeeklyAccess
 import com.mywordsmyway.model.ModelService
 import com.mywordsmyway.storage.plainNoteText
 import kotlinx.coroutines.Dispatchers
@@ -57,15 +55,7 @@ class DefaultConversationRepository(
     private val noteImageDao = database.noteImageDao()
     private val nounDao = database.nounDao()
     private val gemmaNoteProcessingDao = database.gemmaNoteProcessingDao()
-    private val paymentDao = database.paymentDao()
     private val safetyEventDao = database.safetyEventDao()
-
-    override fun observeWeeklyAccess(): Flow<WeeklyAccess> {
-        val weekStart = currentWeekStart()
-        return conversationDao.observeFreeConversationsSince(weekStart).map { count ->
-            WeeklyAccess(freeConversationAvailable = count == 0)
-        }
-    }
 
     override fun observeCurrentConversation(): Flow<ConversationEntity?> =
         conversationDao.observeCurrentConversation()
@@ -205,16 +195,10 @@ class DefaultConversationRepository(
         )
     }
 
-    override suspend fun startConversation(paymentAcknowledged: Boolean): StartConversationResult =
-        startConversation(paymentAcknowledged = paymentAcknowledged, folderId = null)
+    override suspend fun startConversation(): StartConversationResult =
+        startConversation(folderId = null)
 
-    override suspend fun startConversation(paymentAcknowledged: Boolean, folderId: String?): StartConversationResult {
-        val weekStart = currentWeekStart()
-        val freeUsed = conversationDao.countFreeConversationsSince(weekStart) > 0
-        if (freeUsed && !paymentAcknowledged) {
-            error("Payment acknowledgement is required after this week's free conversation.")
-        }
-
+    override suspend fun startConversation(folderId: String?): StartConversationResult {
         val now = clock.instant()
         ensureDefaultFolder()
         val conversation = ConversationEntity(
@@ -223,28 +207,14 @@ class DefaultConversationRepository(
             title = "Untitled reflection",
             finalNote = "",
             safetyStatus = "none",
-            paymentStatus = if (freeUsed) "paid_acknowledged" else "free_weekly",
-            isFreeWeekly = !freeUsed,
+            paymentStatus = "free",
+            isFreeWeekly = true,
             folderId = folderId ?: DEFAULT_NOTE_FOLDER_ID,
             isLocked = false,
             passwordSalt = null,
             passwordHash = null,
         )
-        database.withTransaction {
-            conversationDao.insertConversation(conversation)
-            if (freeUsed) {
-                paymentDao.insertPayment(
-                    PaymentEntity(
-                        id = UUID.randomUUID().toString(),
-                        conversationId = conversation.id,
-                        status = "acknowledged",
-                        productId = "paid_reflection_acknowledgement",
-                        purchaseToken = null,
-                        createdAt = now,
-                    ),
-                )
-            }
-        }
+        conversationDao.insertConversation(conversation)
         return StartConversationResult(conversation = conversation, question = LISTENING_QUESTION)
     }
 

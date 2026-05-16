@@ -202,7 +202,6 @@ fun AccessScreen(
     onConversationSelected: (String) -> Unit,
     onNotNow: () -> Unit,
 ) {
-    val access by viewModel.weeklyAccess.collectAsState()
     val history by viewModel.observeConversationHistory().collectAsState(initial = emptyList())
     val currentConversation by viewModel.observeCurrentConversation().collectAsState(initial = null)
     val visibleHistory = remember(history, currentConversation?.id) {
@@ -215,52 +214,21 @@ fun AccessScreen(
         item {
             Text("Record", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))
-            if (access.freeConversationAvailable) {
-                Text("1 free conversation this week", style = MaterialTheme.typography.headlineSmall)
-                Spacer(Modifier.height(8.dp))
-                Text("Record multiple memos in one conversation. After each memo, the app asks one question. When you stop, write your own note.")
-                Spacer(Modifier.height(24.dp))
-                Button(
-                    onClick = {
-                        scope.launch {
-                            viewModel.startConversation(paymentAcknowledged = false)
-                                .onSuccess(onConversationStarted)
-                                .onFailure { error = it.message.orEmpty() }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Start conversation")
-                }
-            } else {
-                Text("This week's free conversation has been used.", style = MaterialTheme.typography.headlineSmall)
-                Spacer(Modifier.height(12.dp))
-                Text("Paid conversation", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.height(8.dp))
-                Text("Paying is a boundary. It asks you to slow down and write carefully. It does not make this app psychoanalysis.")
-                Spacer(Modifier.height(24.dp))
-                Button(
-                    onClick = {
-                        scope.launch {
-                            viewModel.startConversation(paymentAcknowledged = true)
-                                .onSuccess(onConversationStarted)
-                                .onFailure { error = it.message.orEmpty() }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Continue with paid conversation")
-                }
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = onNotNow, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Close, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Not now")
-                }
+            Text("You can always create a note or start a voice reflection. Record multiple memos in one conversation. After each memo, the app asks one question. When you stop, write your own note.")
+            Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        viewModel.startConversation()
+                            .onSuccess(onConversationStarted)
+                            .onFailure { error = it.message.orEmpty() }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Start conversation")
             }
             Spacer(Modifier.height(16.dp))
             Text(

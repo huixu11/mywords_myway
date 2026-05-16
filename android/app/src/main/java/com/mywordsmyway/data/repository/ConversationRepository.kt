@@ -10,11 +10,9 @@ import com.mywordsmyway.data.local.VoiceMemoEntity
 import com.mywordsmyway.data.model.AddMemoResult
 import com.mywordsmyway.data.model.NoteFileAttachment
 import com.mywordsmyway.data.model.StartConversationResult
-import com.mywordsmyway.data.model.WeeklyAccess
 import kotlinx.coroutines.flow.Flow
 
 interface ConversationRepository {
-    fun observeWeeklyAccess(): Flow<WeeklyAccess>
     fun observeCurrentConversation(): Flow<ConversationEntity?>
     fun observeConversationHistory(): Flow<List<ConversationSummaryEntity>>
     fun observeConversation(conversationId: String): Flow<ConversationEntity?>
@@ -28,8 +26,8 @@ interface ConversationRepository {
     suspend fun getUnprocessedGemmaNoteContent(): List<ConversationEntity>
     suspend fun markGemmaNoteProcessed(conversationId: String)
     suspend fun clearGemmaProcessedNotes()
-    suspend fun startConversation(paymentAcknowledged: Boolean): StartConversationResult
-    suspend fun startConversation(paymentAcknowledged: Boolean, folderId: String?): StartConversationResult
+    suspend fun startConversation(): StartConversationResult
+    suspend fun startConversation(folderId: String?): StartConversationResult
     suspend fun createNoteFolder(name: String)
     suspend fun renameNoteFolder(folderId: String, name: String)
     suspend fun deleteNoteFolder(folderId: String)
