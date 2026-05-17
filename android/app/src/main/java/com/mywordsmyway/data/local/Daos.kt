@@ -44,6 +44,18 @@ interface ConversationDao {
         FROM note_folders
         LEFT JOIN conversations ON conversations.folderId = note_folders.id
             AND TRIM(conversations.finalNote) != ''
+        GROUP BY note_folders.id
+        ORDER BY note_folders.sortOrder ASC, note_folders.createdAt ASC
+        """,
+    )
+    fun observeAllNoteFolders(): Flow<List<NoteFolderWithCount>>
+
+    @Query(
+        """
+        SELECT note_folders.*, COUNT(conversations.id) AS noteCount
+        FROM note_folders
+        LEFT JOIN conversations ON conversations.folderId = note_folders.id
+            AND TRIM(conversations.finalNote) != ''
         WHERE note_folders.parentFolderId = :parentFolderId
         GROUP BY note_folders.id
         ORDER BY note_folders.sortOrder ASC, note_folders.createdAt ASC
@@ -83,6 +95,9 @@ interface ConversationDao {
 
     @Query("UPDATE note_folders SET name = :name WHERE id = :folderId AND isDefault = 0")
     suspend fun renameNoteFolder(folderId: String, name: String)
+
+    @Query("UPDATE note_folders SET parentFolderId = :parentFolderId WHERE id = :folderId AND isDefault = 0")
+    suspend fun moveNoteFolder(folderId: String, parentFolderId: String?)
 
     @Query("DELETE FROM note_folders WHERE id = :folderId AND isDefault = 0")
     suspend fun deleteNoteFolder(folderId: String)

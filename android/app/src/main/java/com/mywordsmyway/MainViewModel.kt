@@ -158,6 +158,9 @@ class MainViewModel(
     fun observeNoteFolders(): Flow<List<NoteFolderWithCount>> =
         conversationRepository.observeNoteFolders()
 
+    fun observeAllNoteFolders(): Flow<List<NoteFolderWithCount>> =
+        conversationRepository.observeAllNoteFolders()
+
     fun observeChildNoteFolders(parentFolderId: String): Flow<List<NoteFolderWithCount>> =
         conversationRepository.observeChildNoteFolders(parentFolderId)
 
@@ -181,6 +184,10 @@ class MainViewModel(
 
     suspend fun renameNoteFolder(folderId: String, name: String): Result<Unit> = runCatching {
         conversationRepository.renameNoteFolder(folderId, name)
+    }
+
+    suspend fun moveNoteFolder(folderId: String, parentFolderId: String?): Result<Unit> = runCatching {
+        conversationRepository.moveNoteFolder(folderId, parentFolderId)
     }
 
     suspend fun deleteNoteFolder(folderId: String): Result<Unit> = runCatching {

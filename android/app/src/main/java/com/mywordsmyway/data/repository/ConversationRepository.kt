@@ -21,6 +21,7 @@ interface ConversationRepository {
     fun observeNoteImages(conversationId: String): Flow<List<NoteImageEntity>>
     fun observeNoteFolder(folderId: String): Flow<NoteFolderEntity?>
     fun observeNoteFolders(): Flow<List<NoteFolderWithCount>>
+    fun observeAllNoteFolders(): Flow<List<NoteFolderWithCount>>
     fun observeChildNoteFolders(parentFolderId: String): Flow<List<NoteFolderWithCount>>
     fun observeNotes(folderId: String?, query: String, startDate: String, endDate: String): Flow<List<ConversationEntity>>
     fun observeNotesInFolder(folderId: String?, startDate: String, endDate: String): Flow<List<ConversationEntity>>
@@ -33,6 +34,7 @@ interface ConversationRepository {
     suspend fun startConversation(folderId: String?): StartConversationResult
     suspend fun createNoteFolder(name: String, parentFolderId: String? = null)
     suspend fun renameNoteFolder(folderId: String, name: String)
+    suspend fun moveNoteFolder(folderId: String, parentFolderId: String?)
     suspend fun deleteNoteFolder(folderId: String)
     suspend fun moveNoteToFolder(conversationId: String, folderId: String?)
     suspend fun lockNote(conversationId: String, password: String)

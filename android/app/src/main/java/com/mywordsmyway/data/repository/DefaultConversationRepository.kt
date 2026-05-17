@@ -78,6 +78,9 @@ class DefaultConversationRepository(
     override fun observeNoteFolders(): Flow<List<NoteFolderWithCount>> =
         conversationDao.observeNoteFolders().onStart { ensureDefaultFolder() }
 
+    override fun observeAllNoteFolders(): Flow<List<NoteFolderWithCount>> =
+        conversationDao.observeAllNoteFolders().onStart { ensureDefaultFolder() }
+
     override fun observeChildNoteFolders(parentFolderId: String): Flow<List<NoteFolderWithCount>> =
         conversationDao.observeChildNoteFolders(parentFolderId)
 
@@ -164,12 +167,25 @@ class DefaultConversationRepository(
         conversationDao.renameNoteFolder(folderId, cleanName)
     }
 
+    override suspend fun moveNoteFolder(folderId: String, parentFolderId: String?) {
+        require(folderId != parentFolderId) { "A folder cannot be moved into itself." }
+        require(parentFolderId != DEFAULT_NOTE_FOLDER_ID) { "Folders cannot be moved into Notes." }
+        val descendantIds = collectDescendantFolderIds(folderId)
+        require(parentFolderId == null || parentFolderId !in descendantIds) { "A folder cannot be moved into one of its subfolders." }
+        conversationDao.moveNoteFolder(folderId, parentFolderId)
+    }
+
     override suspend fun deleteNoteFolder(folderId: String) {
         database.withTransaction {
             deleteNoteFolderContents(folderId)
             conversationDao.deleteNoteFolder(folderId)
         }
     }
+
+    private suspend fun collectDescendantFolderIds(folderId: String): Set<String> =
+        conversationDao.getChildNoteFolders(folderId)
+            .flatMap { child -> listOf(child.id) + collectDescendantFolderIds(child.id) }
+            .toSet()
 
     private suspend fun deleteNoteFolderContents(folderId: String) {
         conversationDao.getChildNoteFolders(folderId).forEach { childFolder ->

@@ -22,6 +22,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.text.BasicTextField
@@ -40,6 +41,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,6 +53,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -75,6 +78,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.AlertDialog
@@ -106,6 +110,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -125,6 +130,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Brush as ComposeBrush
@@ -135,6 +141,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -156,6 +164,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -1641,15 +1650,26 @@ fun NotesScreen(
     var showCreateFolderDialog by rememberSaveable { mutableStateOf(false) }
     var createFolderParentId by rememberSaveable { mutableStateOf<String?>(null) }
     var renameFolderTarget by remember { mutableStateOf<NoteFolderWithCount?>(null) }
-    val folders by viewModel.observeNoteFolders().collectAsState(initial = emptyList())
+    var moveFolderTarget by remember { mutableStateOf<NoteFolderWithCount?>(null) }
+    val expandedFolderIds = remember { mutableStateListOf<String>() }
+    val folderBounds = remember { mutableStateMapOf<String, Rect>() }
+    var draggingFolder by remember { mutableStateOf<NoteFolderWithCount?>(null) }
+    var dragPosition by remember { mutableStateOf<Offset?>(null) }
+    var dropTargetFolderId by remember { mutableStateOf<String?>(null) }
+    val folders by viewModel.observeAllNoteFolders().collectAsState(initial = emptyList())
+    val draggingFolderId = draggingFolder?.folder?.id
+    val visibleFolderRows = remember(folders, expandedFolderIds.toList(), editingFolders, draggingFolderId) {
+        visibleFolderRows(
+            folders = folders,
+            expandedFolderIds = expandedFolderIds.toSet(),
+            showAll = editingFolders,
+            foldedFolderIds = setOfNotNull(draggingFolderId),
+        )
+    }
     val selectedFolderFlow = remember(selectedFolderId) {
         selectedFolderId?.let { viewModel.observeNoteFolder(it) }
     }
     val selectedFolder by selectedFolderFlow?.collectAsState(initial = null) ?: remember { mutableStateOf(null) }
-    val childFoldersFlow = remember(selectedFolderId) {
-        selectedFolderId?.let { viewModel.observeChildNoteFolders(it) }
-    }
-    val childFolders by childFoldersFlow?.collectAsState(initial = emptyList()) ?: remember { mutableStateOf(emptyList()) }
     val searchScopeFolderId = selectedFolderId.takeIf { query.isBlank() || selectedFolder != null }
     val notesFlow = remember(searchScopeFolderId) {
         viewModel.observeNotesInFolder(searchScopeFolderId, "", "")
@@ -1659,6 +1679,39 @@ fun NotesScreen(
     val topHits = remember(searchResults, query) { if (query.isBlank()) emptyList() else searchResults.take(3) }
     var notePendingDelete by remember { mutableStateOf<ConversationEntity?>(null) }
     var folderPendingDelete by remember { mutableStateOf<NoteFolderWithCount?>(null) }
+    fun updateFolderDropTarget(position: Offset?) {
+        dragPosition = position
+        val source = draggingFolder ?: run {
+            dropTargetFolderId = null
+            return
+        }
+        val blockedIds = descendantFolderIds(source.folder.id, folders) + source.folder.id
+        dropTargetFolderId = position?.let { point ->
+            folderBounds
+                .filterKeys { it !in blockedIds }
+                .filterKeys { folderId -> folders.firstOrNull { it.folder.id == folderId }?.folder?.isDefault != true }
+                .entries
+                .firstOrNull { (_, bounds) -> bounds.contains(point) }
+                ?.key
+        }
+    }
+    fun finishFolderDrag() {
+        val source = draggingFolder
+        val targetId = dropTargetFolderId
+        draggingFolder = null
+        dragPosition = null
+        dropTargetFolderId = null
+        if (source != null && targetId != null && source.folder.parentFolderId != targetId) {
+            scope.launch {
+                viewModel.moveNoteFolder(source.folder.id, targetId)
+                    .onSuccess {
+                        createError = ""
+                        if (targetId !in expandedFolderIds) expandedFolderIds.add(targetId)
+                    }
+                    .onFailure { createError = it.message ?: "Could not move folder." }
+            }
+        }
+    }
     fun createNoteInCurrentFolder() {
         scope.launch {
             viewModel.startNote(selectedFolderId)
@@ -1733,12 +1786,21 @@ fun NotesScreen(
                     }
                 }
             } else if (selectedFolder == null) {
-                items(folders, key = { it.folder.id }) { folder ->
+                items(visibleFolderRows, key = { it.folder.folder.id }) { folderRow ->
+                    val folder = folderRow.folder
                     if (folder.folder.isDefault) {
                         NoteFolderRow(
                             folder = folder,
+                            depth = folderRow.depth,
+                            hasChildren = folderRow.hasChildren,
+                            isExpanded = folder.folder.id in expandedFolderIds,
+                            editMode = editingFolders,
                             showMore = false,
                             onClick = { selectedFolderId = folder.folder.id },
+                            onToggleChildren = {
+                                toggleExpandedFolder(expandedFolderIds, folder.folder.id)
+                            },
+                            onBoundsChanged = { bounds -> folderBounds[folder.folder.id] = bounds },
                         )
                     } else {
                         SwipeToDeleteRow(
@@ -1747,12 +1809,34 @@ fun NotesScreen(
                         ) {
                             NoteFolderRow(
                                 folder = folder,
+                                depth = folderRow.depth,
+                                hasChildren = folderRow.hasChildren,
+                                isExpanded = folder.folder.id in expandedFolderIds,
+                                editMode = editingFolders,
                                 showMore = editingFolders,
                                 onClick = { selectedFolderId = folder.folder.id },
+                                onToggleChildren = {
+                                    toggleExpandedFolder(expandedFolderIds, folder.folder.id)
+                                },
+                                dragEnabled = editingFolders,
+                                isDragging = draggingFolder?.folder?.id == folder.folder.id,
+                                isDropTarget = dropTargetFolderId == folder.folder.id,
+                                onBoundsChanged = { bounds -> folderBounds[folder.folder.id] = bounds },
+                                onDragStart = { offset ->
+                                    draggingFolder = folder
+                                    updateFolderDropTarget(offset)
+                                },
+                                onDrag = { offset ->
+                                    folderBounds[folder.folder.id]?.let { bounds ->
+                                        updateFolderDropTarget(bounds.topLeft + offset)
+                                    }
+                                },
+                                onDragEnd = ::finishFolderDrag,
                                 onAddFolder = {
                                     createFolderParentId = folder.folder.id
                                     showCreateFolderDialog = true
                                 },
+                                onMove = { moveFolderTarget = folder },
                                 onRename = { renameFolderTarget = folder },
                                 onDelete = { folderPendingDelete = folder },
                             )
@@ -1760,27 +1844,6 @@ fun NotesScreen(
                     }
                 }
             } else {
-                if (childFolders.isNotEmpty()) {
-                    item { Text("Folders", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
-                    items(childFolders, key = { it.folder.id }) { folder ->
-                        SwipeToDeleteRow(
-                            contentDescription = "Delete folder",
-                            onDelete = { folderPendingDelete = folder },
-                        ) {
-                            NoteFolderRow(
-                                folder = folder,
-                                showMore = editingFolders,
-                                onClick = { selectedFolderId = folder.folder.id },
-                                onAddFolder = {
-                                    createFolderParentId = folder.folder.id
-                                    showCreateFolderDialog = true
-                                },
-                                onRename = { renameFolderTarget = folder },
-                                onDelete = { folderPendingDelete = folder },
-                            )
-                        }
-                    }
-                }
                 item {
                     Text("${notes.size} ${if (notes.size == 1) "note" else "notes"}", style = MaterialTheme.typography.titleMedium)
                 }
@@ -1810,6 +1873,13 @@ fun NotesScreen(
                     bottom = contentPadding.calculateBottomPadding() + 12.dp,
                 ),
         )
+        if (draggingFolder != null && dragPosition != null) {
+            DraggingFolderOverlay(
+                folder = requireNotNull(draggingFolder),
+                position = requireNotNull(dragPosition),
+                modifier = Modifier.align(Alignment.TopStart),
+            )
+        }
     }
 
     notePendingDelete?.let { note ->
@@ -1876,6 +1946,23 @@ fun NotesScreen(
                             createError = ""
                         }
                         .onFailure { createError = it.message ?: "Could not rename folder." }
+                }
+            },
+        )
+    }
+    moveFolderTarget?.let { folder ->
+        MoveFolderDialog(
+            folder = folder,
+            folders = folders,
+            onDismiss = { moveFolderTarget = null },
+            onMove = { parentFolderId ->
+                scope.launch {
+                    viewModel.moveNoteFolder(folder.folder.id, parentFolderId)
+                        .onSuccess {
+                            moveFolderTarget = null
+                            createError = ""
+                        }
+                        .onFailure { createError = it.message ?: "Could not move folder." }
                 }
             },
         )
@@ -2597,30 +2684,109 @@ private fun BorromeanWordDialog(
 @Composable
 private fun NoteFolderRow(
     folder: NoteFolderWithCount,
+    depth: Int = 0,
+    hasChildren: Boolean = false,
+    isExpanded: Boolean = false,
+    editMode: Boolean = false,
     showMore: Boolean = false,
+    dragEnabled: Boolean = false,
+    isDragging: Boolean = false,
+    isDropTarget: Boolean = false,
     onClick: () -> Unit,
+    onToggleChildren: () -> Unit = {},
+    onBoundsChanged: (Rect) -> Unit = {},
+    onDragStart: (Offset) -> Unit = {},
+    onDrag: (Offset) -> Unit = {},
+    onDragEnd: () -> Unit = {},
     onAddFolder: () -> Unit = {},
+    onMove: () -> Unit = {},
     onRename: () -> Unit = {},
     onDelete: () -> Unit = {},
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    var latestBounds by remember { mutableStateOf<Rect?>(null) }
+    val dragModifier = if (dragEnabled) {
+        Modifier.pointerInput(folder.folder.id, latestBounds) {
+            detectDragGestures(
+                onDragStart = { offset ->
+                    latestBounds?.let { bounds -> onDragStart(bounds.topLeft + offset) }
+                },
+                onDrag = { change, _ ->
+                    onDrag(change.position)
+                },
+                onDragEnd = onDragEnd,
+                onDragCancel = onDragEnd,
+            )
+        }
+    } else {
+        Modifier
+    }
+    val rowContainerColor = when {
+        isDropTarget -> MaterialTheme.colorScheme.primaryContainer
+        isDragging -> MaterialTheme.colorScheme.surfaceVariant
+        editMode && folder.folder.isDefault -> MaterialTheme.colorScheme.surfaceVariant
+        editMode -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surface
+    }
+    val rowContentColor = if (editMode && folder.folder.isDefault) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val supportingContentColor = if (editMode && folder.folder.isDefault) {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Surface(
         shape = RoundedCornerShape(8.dp),
         tonalElevation = 1.dp,
+        color = rowContainerColor,
         modifier = Modifier
             .fillMaxWidth()
+            .onGloballyPositioned { coordinates ->
+                val bounds = coordinates.boundsInRoot()
+                latestBounds = bounds
+                onBoundsChanged(bounds)
+            }
             .clickable(onClick = onClick),
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(start = 16.dp + (depth * 22).dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
+            Box(modifier = Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+                if (hasChildren) {
+                    Icon(
+                        imageVector = if (isExpanded || showMore) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = if (isExpanded) "Hide subfolders" else "Show subfolders",
+                        tint = if (editMode && folder.folder.isDefault) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clickable(onClick = onToggleChildren),
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(folder.folder.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    folder.folder.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = rowContentColor,
+                )
                 Text(
                     "${folder.noteCount} ${if (folder.noteCount == 1) "note" else "notes"}",
+                    color = supportingContentColor,
+                )
+            }
+            if (editMode && folder.folder.isDefault) {
+                Text(
+                    "Fixed",
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp),
                 )
             }
             if (showMore) {
@@ -2631,8 +2797,10 @@ private fun NoteFolderRow(
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
                             text = { Text("Move This Folder") },
-                            enabled = false,
-                            onClick = { menuOpen = false },
+                            onClick = {
+                                menuOpen = false
+                                onMove()
+                            },
                         )
                         DropdownMenuItem(
                             text = { Text("Add Folder") },
@@ -2660,8 +2828,56 @@ private fun NoteFolderRow(
                         )
                     }
                 }
-            } else {
-                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .then(dragModifier),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.DragHandle,
+                        contentDescription = "Drag to move folder",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DraggingFolderOverlay(
+    folder: NoteFolderWithCount,
+    position: Offset,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .offset {
+                IntOffset(
+                    x = (position.x - 140f).toInt(),
+                    y = (position.y - 32f).toInt(),
+                )
+            }
+            .width(280.dp),
+        shape = RoundedCornerShape(14.dp),
+        tonalElevation = 8.dp,
+        shadowElevation = 10.dp,
+        color = MaterialTheme.colorScheme.primaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(Icons.Default.DragHandle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(folder.folder.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${folder.noteCount} ${if (folder.noteCount == 1) "note" else "notes"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -2702,6 +2918,99 @@ private fun FolderNameDialog(
             }
         },
     )
+}
+
+@Composable
+private fun MoveFolderDialog(
+    folder: NoteFolderWithCount,
+    folders: List<NoteFolderWithCount>,
+    onDismiss: () -> Unit,
+    onMove: (String?) -> Unit,
+) {
+    val blockedIds = remember(folder, folders) { descendantFolderIds(folder.folder.id, folders) + folder.folder.id }
+    val destinations = remember(folder, folders) {
+        listOf(null to "Top Level") +
+            visibleFolderRows(folders, expandedFolderIds = emptySet(), showAll = true)
+                .filterNot { it.folder.folder.id in blockedIds }
+                .filterNot { it.folder.folder.isDefault }
+                .map { row -> row.folder.folder.id to "${"  ".repeat(row.depth)}${row.folder.folder.name}" }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Move \"${folder.folder.name}\"") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.heightIn(max = 360.dp)) {
+                items(destinations, key = { it.first ?: "top" }) { destination ->
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        tonalElevation = 1.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onMove(destination.first) },
+                    ) {
+                        Text(
+                            destination.second,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+private data class NoteFolderTreeRow(
+    val folder: NoteFolderWithCount,
+    val depth: Int,
+    val hasChildren: Boolean,
+)
+
+private fun visibleFolderRows(folders: List<NoteFolderWithCount>): List<NoteFolderTreeRow> {
+    return visibleFolderRows(folders, expandedFolderIds = emptySet(), showAll = true)
+}
+
+private fun visibleFolderRows(
+    folders: List<NoteFolderWithCount>,
+    expandedFolderIds: Set<String>,
+    showAll: Boolean,
+    foldedFolderIds: Set<String> = emptySet(),
+): List<NoteFolderTreeRow> {
+    val childrenByParent = folders.groupBy { it.folder.parentFolderId }
+    fun rowsFor(parentFolderId: String?, depth: Int): List<NoteFolderTreeRow> =
+        childrenByParent[parentFolderId].orEmpty().flatMap { folder ->
+            val children = childrenByParent[folder.folder.id].orEmpty()
+            val childRows = if (folder.folder.id !in foldedFolderIds && (showAll || folder.folder.id in expandedFolderIds)) {
+                rowsFor(folder.folder.id, depth + 1)
+            } else {
+                emptyList()
+            }
+            listOf(NoteFolderTreeRow(folder, depth, children.isNotEmpty())) + childRows
+        }
+    return rowsFor(parentFolderId = null, depth = 0)
+}
+
+private fun toggleExpandedFolder(expandedFolderIds: MutableList<String>, folderId: String) {
+    if (folderId in expandedFolderIds) {
+        expandedFolderIds.remove(folderId)
+    } else {
+        expandedFolderIds.add(folderId)
+    }
+}
+
+private fun descendantFolderIds(folderId: String, folders: List<NoteFolderWithCount>): Set<String> {
+    val childrenByParent = folders.groupBy { it.folder.parentFolderId }
+    fun collect(parentId: String): Set<String> =
+        childrenByParent[parentId].orEmpty()
+            .flatMap { child -> listOf(child.folder.id) + collect(child.folder.id) }
+            .toSet()
+    return collect(folderId)
 }
 
 @Composable
