@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -1864,7 +1865,7 @@ fun NotesScreen(
         NotesBottomSearchBar(
             query = query,
             onQueryChange = { query = it },
-            onVoiceNote = ::createNoteInCurrentFolder,
+            onCreateNote = ::createNoteInCurrentFolder,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(
@@ -3065,7 +3066,7 @@ private fun NoteSearchResultRow(
 private fun NotesBottomSearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
-    onVoiceNote: () -> Unit,
+    onCreateNote: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -3087,8 +3088,12 @@ private fun NotesBottomSearchBar(
                 placeholder = { Text("Search") },
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = onVoiceNote) {
-                Icon(Icons.Default.Mic, contentDescription = "New voice note")
+            IconButton(onClick = onCreateNote) {
+                Icon(
+                    Icons.Default.EditNote,
+                    contentDescription = "New note",
+                    modifier = Modifier.size(32.dp),
+                )
             }
         }
     }
