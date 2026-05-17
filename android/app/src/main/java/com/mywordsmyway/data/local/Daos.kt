@@ -19,6 +19,9 @@ interface ConversationDao {
     @Query("SELECT * FROM note_folders WHERE isDefault = 1 LIMIT 1")
     suspend fun getDefaultNoteFolder(): NoteFolderEntity?
 
+    @Query("SELECT * FROM note_folders WHERE id = :folderId")
+    fun observeNoteFolder(folderId: String): Flow<NoteFolderEntity?>
+
     @Query("SELECT COUNT(*) FROM note_folders")
     suspend fun countNoteFolders(): Int
 
@@ -28,11 +31,28 @@ interface ConversationDao {
         FROM note_folders
         LEFT JOIN conversations ON conversations.folderId = note_folders.id
             AND TRIM(conversations.finalNote) != ''
+        WHERE note_folders.parentFolderId IS NULL
         GROUP BY note_folders.id
         ORDER BY note_folders.sortOrder ASC, note_folders.createdAt ASC
         """,
     )
     fun observeNoteFolders(): Flow<List<NoteFolderWithCount>>
+
+    @Query(
+        """
+        SELECT note_folders.*, COUNT(conversations.id) AS noteCount
+        FROM note_folders
+        LEFT JOIN conversations ON conversations.folderId = note_folders.id
+            AND TRIM(conversations.finalNote) != ''
+        WHERE note_folders.parentFolderId = :parentFolderId
+        GROUP BY note_folders.id
+        ORDER BY note_folders.sortOrder ASC, note_folders.createdAt ASC
+        """,
+    )
+    fun observeChildNoteFolders(parentFolderId: String): Flow<List<NoteFolderWithCount>>
+
+    @Query("SELECT * FROM note_folders WHERE parentFolderId = :parentFolderId")
+    suspend fun getChildNoteFolders(parentFolderId: String): List<NoteFolderEntity>
 
     @Query("SELECT * FROM conversations WHERE finalNote = '' ORDER BY createdAt DESC LIMIT 1")
     fun observeCurrentConversation(): Flow<ConversationEntity?>

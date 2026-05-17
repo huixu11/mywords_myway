@@ -72,8 +72,14 @@ class DefaultConversationRepository(
     override fun observeNoteImages(conversationId: String): Flow<List<NoteImageEntity>> =
         noteImageDao.observeImagesForConversation(conversationId)
 
+    override fun observeNoteFolder(folderId: String): Flow<NoteFolderEntity?> =
+        conversationDao.observeNoteFolder(folderId)
+
     override fun observeNoteFolders(): Flow<List<NoteFolderWithCount>> =
         conversationDao.observeNoteFolders().onStart { ensureDefaultFolder() }
+
+    override fun observeChildNoteFolders(parentFolderId: String): Flow<List<NoteFolderWithCount>> =
+        conversationDao.observeChildNoteFolders(parentFolderId)
 
     private suspend fun ensureDefaultFolder() {
         if (conversationDao.countNoteFolders() == 0) {
@@ -84,6 +90,7 @@ class DefaultConversationRepository(
                     createdAt = Instant.EPOCH,
                     sortOrder = 0,
                     isDefault = true,
+                    parentFolderId = null,
                 ),
             )
         }
@@ -134,7 +141,7 @@ class DefaultConversationRepository(
         gemmaNoteProcessingDao.clearAll()
     }
 
-    override suspend fun createNoteFolder(name: String) {
+    override suspend fun createNoteFolder(name: String, parentFolderId: String?) {
         val cleanName = name.trim()
         require(cleanName.isNotEmpty()) { "Folder name is required." }
         val now = clock.instant()
@@ -146,6 +153,7 @@ class DefaultConversationRepository(
                 createdAt = now,
                 sortOrder = conversationDao.countNoteFolders(),
                 isDefault = false,
+                parentFolderId = parentFolderId,
             ),
         )
     }
@@ -158,16 +166,24 @@ class DefaultConversationRepository(
 
     override suspend fun deleteNoteFolder(folderId: String) {
         database.withTransaction {
-            conversationDao.getConversationsInFolder(folderId).forEach { conversation ->
-                memoDao.getMemosForConversation(conversation.id).forEach { memo ->
-                    if (memo.audioPath != null) {
-                        storageRepository.deleteMemoAudio(memo.id)
-                    }
-                }
-                noteImageDao.getImagesForConversation(conversation.id).forEach { deleteNoteImageFile(it.imagePath) }
-                conversationDao.deleteConversation(conversation.id)
-            }
+            deleteNoteFolderContents(folderId)
             conversationDao.deleteNoteFolder(folderId)
+        }
+    }
+
+    private suspend fun deleteNoteFolderContents(folderId: String) {
+        conversationDao.getChildNoteFolders(folderId).forEach { childFolder ->
+            deleteNoteFolderContents(childFolder.id)
+            conversationDao.deleteNoteFolder(childFolder.id)
+        }
+        conversationDao.getConversationsInFolder(folderId).forEach { conversation ->
+            memoDao.getMemosForConversation(conversation.id).forEach { memo ->
+                if (memo.audioPath != null) {
+                    storageRepository.deleteMemoAudio(memo.id)
+                }
+            }
+            noteImageDao.getImagesForConversation(conversation.id).forEach { deleteNoteImageFile(it.imagePath) }
+            conversationDao.deleteConversation(conversation.id)
         }
     }
 

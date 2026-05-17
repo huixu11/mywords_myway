@@ -3,6 +3,7 @@ package com.mywordsmyway.data.repository
 import android.net.Uri
 import com.mywordsmyway.data.local.ConversationEntity
 import com.mywordsmyway.data.local.ConversationSummaryEntity
+import com.mywordsmyway.data.local.NoteFolderEntity
 import com.mywordsmyway.data.local.NoteFolderWithCount
 import com.mywordsmyway.data.local.NoteImageEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
@@ -18,7 +19,9 @@ interface ConversationRepository {
     fun observeConversation(conversationId: String): Flow<ConversationEntity?>
     fun observeMemos(conversationId: String): Flow<List<VoiceMemoEntity>>
     fun observeNoteImages(conversationId: String): Flow<List<NoteImageEntity>>
+    fun observeNoteFolder(folderId: String): Flow<NoteFolderEntity?>
     fun observeNoteFolders(): Flow<List<NoteFolderWithCount>>
+    fun observeChildNoteFolders(parentFolderId: String): Flow<List<NoteFolderWithCount>>
     fun observeNotes(folderId: String?, query: String, startDate: String, endDate: String): Flow<List<ConversationEntity>>
     fun observeNotesInFolder(folderId: String?, startDate: String, endDate: String): Flow<List<ConversationEntity>>
     fun observeUnprocessedGemmaNoteCount(): Flow<Int>
@@ -28,7 +31,7 @@ interface ConversationRepository {
     suspend fun clearGemmaProcessedNotes()
     suspend fun startConversation(): StartConversationResult
     suspend fun startConversation(folderId: String?): StartConversationResult
-    suspend fun createNoteFolder(name: String)
+    suspend fun createNoteFolder(name: String, parentFolderId: String? = null)
     suspend fun renameNoteFolder(folderId: String, name: String)
     suspend fun deleteNoteFolder(folderId: String)
     suspend fun moveNoteToFolder(conversationId: String, folderId: String?)

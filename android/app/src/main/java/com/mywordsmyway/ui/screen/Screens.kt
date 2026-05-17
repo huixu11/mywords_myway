@@ -1637,8 +1637,19 @@ fun NotesScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var selectedFolderId by rememberSaveable { mutableStateOf<String?>(null) }
     var createError by rememberSaveable { mutableStateOf("") }
+    var editingFolders by rememberSaveable { mutableStateOf(false) }
+    var showCreateFolderDialog by rememberSaveable { mutableStateOf(false) }
+    var createFolderParentId by rememberSaveable { mutableStateOf<String?>(null) }
+    var renameFolderTarget by remember { mutableStateOf<NoteFolderWithCount?>(null) }
     val folders by viewModel.observeNoteFolders().collectAsState(initial = emptyList())
-    val selectedFolder = folders.firstOrNull { it.folder.id == selectedFolderId }?.folder
+    val selectedFolderFlow = remember(selectedFolderId) {
+        selectedFolderId?.let { viewModel.observeNoteFolder(it) }
+    }
+    val selectedFolder by selectedFolderFlow?.collectAsState(initial = null) ?: remember { mutableStateOf(null) }
+    val childFoldersFlow = remember(selectedFolderId) {
+        selectedFolderId?.let { viewModel.observeChildNoteFolders(it) }
+    }
+    val childFolders by childFoldersFlow?.collectAsState(initial = emptyList()) ?: remember { mutableStateOf(emptyList()) }
     val searchScopeFolderId = selectedFolderId.takeIf { query.isBlank() || selectedFolder != null }
     val notesFlow = remember(searchScopeFolderId) {
         viewModel.observeNotesInFolder(searchScopeFolderId, "", "")
@@ -1671,15 +1682,27 @@ fun NotesScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                if (selectedFolder != null) {
+                val currentFolder = selectedFolder
+                if (currentFolder != null) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        IconButton(onClick = { selectedFolderId = null }) {
+                        IconButton(onClick = { selectedFolderId = currentFolder.parentFolderId }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to folders")
                         }
-                        Text(selectedFolder.name, style = MaterialTheme.typography.headlineMedium)
+                        Text(currentFolder.name, style = MaterialTheme.typography.headlineMedium)
                     }
                 } else {
-                    Text("Folders", style = MaterialTheme.typography.headlineMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Text("Folders", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+                        IconButton(onClick = {
+                            createFolderParentId = null
+                            showCreateFolderDialog = true
+                        }) {
+                            Icon(Icons.Default.Add, contentDescription = "Add folder")
+                        }
+                        TextButton(onClick = { editingFolders = !editingFolders }) {
+                            Text(if (editingFolders) "Done" else "Edit")
+                        }
+                    }
                 }
             }
             item {
@@ -1712,17 +1735,52 @@ fun NotesScreen(
             } else if (selectedFolder == null) {
                 items(folders, key = { it.folder.id }) { folder ->
                     if (folder.folder.isDefault) {
-                        NoteFolderRow(folder = folder, onClick = { selectedFolderId = folder.folder.id })
+                        NoteFolderRow(
+                            folder = folder,
+                            showMore = false,
+                            onClick = { selectedFolderId = folder.folder.id },
+                        )
                     } else {
                         SwipeToDeleteRow(
                             contentDescription = "Delete folder",
                             onDelete = { folderPendingDelete = folder },
                         ) {
-                            NoteFolderRow(folder = folder, onClick = { selectedFolderId = folder.folder.id })
+                            NoteFolderRow(
+                                folder = folder,
+                                showMore = editingFolders,
+                                onClick = { selectedFolderId = folder.folder.id },
+                                onAddFolder = {
+                                    createFolderParentId = folder.folder.id
+                                    showCreateFolderDialog = true
+                                },
+                                onRename = { renameFolderTarget = folder },
+                                onDelete = { folderPendingDelete = folder },
+                            )
                         }
                     }
                 }
             } else {
+                if (childFolders.isNotEmpty()) {
+                    item { Text("Folders", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
+                    items(childFolders, key = { it.folder.id }) { folder ->
+                        SwipeToDeleteRow(
+                            contentDescription = "Delete folder",
+                            onDelete = { folderPendingDelete = folder },
+                        ) {
+                            NoteFolderRow(
+                                folder = folder,
+                                showMore = editingFolders,
+                                onClick = { selectedFolderId = folder.folder.id },
+                                onAddFolder = {
+                                    createFolderParentId = folder.folder.id
+                                    showCreateFolderDialog = true
+                                },
+                                onRename = { renameFolderTarget = folder },
+                                onDelete = { folderPendingDelete = folder },
+                            )
+                        }
+                    }
+                }
                 item {
                     Text("${notes.size} ${if (notes.size == 1) "note" else "notes"}", style = MaterialTheme.typography.titleMedium)
                 }
@@ -1781,6 +1839,43 @@ fun NotesScreen(
                             folderPendingDelete = null
                         }
                         .onFailure { createError = it.message ?: "Could not delete folder." }
+                }
+            },
+        )
+    }
+    if (showCreateFolderDialog) {
+        FolderNameDialog(
+            title = "New Folder",
+            initialName = "",
+            confirmLabel = "Add",
+            onDismiss = { showCreateFolderDialog = false },
+            onSave = { name ->
+                scope.launch {
+                    viewModel.createNoteFolder(name, createFolderParentId)
+                        .onSuccess {
+                            showCreateFolderDialog = false
+                            createFolderParentId = null
+                            createError = ""
+                        }
+                        .onFailure { createError = it.message ?: "Could not create folder." }
+                }
+            },
+        )
+    }
+    renameFolderTarget?.let { folder ->
+        FolderNameDialog(
+            title = "Rename Folder",
+            initialName = folder.folder.name,
+            confirmLabel = "Rename",
+            onDismiss = { renameFolderTarget = null },
+            onSave = { name ->
+                scope.launch {
+                    viewModel.renameNoteFolder(folder.folder.id, name)
+                        .onSuccess {
+                            renameFolderTarget = null
+                            createError = ""
+                        }
+                        .onFailure { createError = it.message ?: "Could not rename folder." }
                 }
             },
         )
@@ -2502,8 +2597,13 @@ private fun BorromeanWordDialog(
 @Composable
 private fun NoteFolderRow(
     folder: NoteFolderWithCount,
+    showMore: Boolean = false,
     onClick: () -> Unit,
+    onAddFolder: () -> Unit = {},
+    onRename: () -> Unit = {},
+    onDelete: () -> Unit = {},
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     Surface(
         shape = RoundedCornerShape(8.dp),
         tonalElevation = 1.dp,
@@ -2523,9 +2623,85 @@ private fun NoteFolderRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+            if (showMore) {
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Folder actions")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Move This Folder") },
+                            enabled = false,
+                            onClick = { menuOpen = false },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add Folder") },
+                            leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                onAddFolder()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                onRename()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete") },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                onDelete()
+                            },
+                        )
+                    }
+                }
+            } else {
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+            }
         }
     }
+}
+
+@Composable
+private fun FolderNameDialog(
+    title: String,
+    initialName: String,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("Folder name") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(name) },
+                enabled = name.trim().isNotEmpty(),
+            ) {
+                Text(confirmLabel)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable

@@ -12,6 +12,7 @@ import com.mywordsmyway.data.local.BorromeanKnotWithWords
 import com.mywordsmyway.data.local.BorromeanWordEntity
 import com.mywordsmyway.data.local.ConversationEntity
 import com.mywordsmyway.data.local.ConversationSummaryEntity
+import com.mywordsmyway.data.local.NoteFolderEntity
 import com.mywordsmyway.data.local.NoteFolderWithCount
 import com.mywordsmyway.data.local.NoteImageEntity
 import com.mywordsmyway.data.local.NounSuggestionEntity
@@ -148,11 +149,17 @@ class MainViewModel(
     fun observeNoteImages(conversationId: String): Flow<List<NoteImageEntity>> =
         conversationRepository.observeNoteImages(conversationId)
 
+    fun observeNoteFolder(folderId: String): Flow<NoteFolderEntity?> =
+        conversationRepository.observeNoteFolder(folderId)
+
     fun observeSuggestions(conversationId: String): Flow<List<NounSuggestionEntity>> =
         wordRepository.observeSuggestions(conversationId)
 
     fun observeNoteFolders(): Flow<List<NoteFolderWithCount>> =
         conversationRepository.observeNoteFolders()
+
+    fun observeChildNoteFolders(parentFolderId: String): Flow<List<NoteFolderWithCount>> =
+        conversationRepository.observeChildNoteFolders(parentFolderId)
 
     fun observeNotes(folderId: String?, query: String, startDate: String, endDate: String): Flow<List<ConversationEntity>> =
         conversationRepository.observeNotes(folderId, query, startDate, endDate)
@@ -168,8 +175,8 @@ class MainViewModel(
         conversationRepository.startConversation(folderId = folderId).conversation.id
     }
 
-    suspend fun createNoteFolder(name: String): Result<Unit> = runCatching {
-        conversationRepository.createNoteFolder(name)
+    suspend fun createNoteFolder(name: String, parentFolderId: String? = null): Result<Unit> = runCatching {
+        conversationRepository.createNoteFolder(name, parentFolderId)
     }
 
     suspend fun renameNoteFolder(folderId: String, name: String): Result<Unit> = runCatching {

@@ -10,13 +10,17 @@ import java.time.Instant
 
 const val DEFAULT_NOTE_FOLDER_ID = "default_notes"
 
-@Entity(tableName = "note_folders")
+@Entity(
+    tableName = "note_folders",
+    indices = [Index("parentFolderId")],
+)
 data class NoteFolderEntity(
     @PrimaryKey val id: String,
     val name: String,
     val createdAt: Instant,
     val sortOrder: Int,
     val isDefault: Boolean,
+    val parentFolderId: String?,
 )
 
 @Entity(
