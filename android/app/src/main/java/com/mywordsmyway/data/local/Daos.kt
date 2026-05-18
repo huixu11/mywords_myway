@@ -30,7 +30,7 @@ interface ConversationDao {
         SELECT note_folders.*, COUNT(conversations.id) AS noteCount
         FROM note_folders
         LEFT JOIN conversations ON conversations.folderId = note_folders.id
-            AND TRIM(conversations.finalNote) != ''
+            AND (TRIM(conversations.finalNote) != '' OR TRIM(conversations.title) NOT IN ('', 'Untitled reflection', 'Untitled note'))
         WHERE note_folders.parentFolderId IS NULL
         GROUP BY note_folders.id
         ORDER BY note_folders.sortOrder ASC, note_folders.createdAt ASC
@@ -43,7 +43,7 @@ interface ConversationDao {
         SELECT note_folders.*, COUNT(conversations.id) AS noteCount
         FROM note_folders
         LEFT JOIN conversations ON conversations.folderId = note_folders.id
-            AND TRIM(conversations.finalNote) != ''
+            AND (TRIM(conversations.finalNote) != '' OR TRIM(conversations.title) NOT IN ('', 'Untitled reflection', 'Untitled note'))
         GROUP BY note_folders.id
         ORDER BY note_folders.sortOrder ASC, note_folders.createdAt ASC
         """,
@@ -55,7 +55,7 @@ interface ConversationDao {
         SELECT note_folders.*, COUNT(conversations.id) AS noteCount
         FROM note_folders
         LEFT JOIN conversations ON conversations.folderId = note_folders.id
-            AND TRIM(conversations.finalNote) != ''
+            AND (TRIM(conversations.finalNote) != '' OR TRIM(conversations.title) NOT IN ('', 'Untitled reflection', 'Untitled note'))
         WHERE note_folders.parentFolderId = :parentFolderId
         GROUP BY note_folders.id
         ORDER BY note_folders.sortOrder ASC, note_folders.createdAt ASC
@@ -75,7 +75,9 @@ interface ConversationDao {
         FROM conversations
         LEFT JOIN voice_memos ON voice_memos.conversationId = conversations.id
         GROUP BY conversations.id
-        HAVING memoCount > 0 OR TRIM(finalNote) != ''
+        HAVING memoCount > 0
+          OR TRIM(finalNote) != ''
+          OR TRIM(title) NOT IN ('', 'Untitled reflection', 'Untitled note')
         ORDER BY conversations.createdAt DESC
         """,
     )
@@ -138,6 +140,7 @@ interface ConversationDao {
           AND (:end IS NULL OR conversations.createdAt < :end)
         GROUP BY conversations.id
         HAVING TRIM(finalNote) != ''
+          OR TRIM(title) NOT IN ('', 'Untitled reflection', 'Untitled note')
           OR COUNT(DISTINCT voice_memos.id) > 0
           OR COUNT(DISTINCT note_images.id) > 0
         ORDER BY conversations.createdAt DESC
@@ -161,6 +164,7 @@ interface ConversationDao {
           AND (:end IS NULL OR conversations.createdAt < :end)
         GROUP BY conversations.id
         HAVING TRIM(finalNote) != ''
+          OR TRIM(title) NOT IN ('', 'Untitled reflection', 'Untitled note')
           OR COUNT(DISTINCT voice_memos.id) > 0
           OR COUNT(DISTINCT note_images.id) > 0
         ORDER BY conversations.createdAt DESC
@@ -172,7 +176,7 @@ interface ConversationDao {
         end: Instant?,
     ): Flow<List<ConversationEntity>>
 
-    @Query("SELECT * FROM conversations WHERE TRIM(finalNote) != '' ORDER BY createdAt DESC")
+    @Query("SELECT * FROM conversations WHERE TRIM(finalNote) != '' OR TRIM(title) NOT IN ('', 'Untitled reflection', 'Untitled note') ORDER BY createdAt DESC")
     suspend fun getAllNotes(): List<ConversationEntity>
 
     @Query(
@@ -183,6 +187,7 @@ interface ConversationDao {
         LEFT JOIN note_images ON note_images.conversationId = conversations.id
         GROUP BY conversations.id
         HAVING TRIM(finalNote) != ''
+          OR TRIM(title) NOT IN ('', 'Untitled reflection', 'Untitled note')
           OR COUNT(DISTINCT voice_memos.id) > 0
           OR COUNT(DISTINCT note_images.id) > 0
         ORDER BY conversations.createdAt DESC
@@ -202,6 +207,7 @@ interface ConversationDao {
             WHERE gemma_note_processing.conversationId IS NULL
             GROUP BY conversations.id
             HAVING TRIM(finalNote) != ''
+              OR TRIM(title) NOT IN ('', 'Untitled reflection', 'Untitled note')
               OR COUNT(DISTINCT voice_memos.id) > 0
               OR COUNT(DISTINCT note_images.id) > 0
         )
@@ -220,6 +226,7 @@ interface ConversationDao {
         WHERE gemma_note_processing.conversationId IS NULL
         GROUP BY conversations.id
         HAVING TRIM(finalNote) != ''
+          OR TRIM(title) NOT IN ('', 'Untitled reflection', 'Untitled note')
           OR COUNT(DISTINCT voice_memos.id) > 0
           OR COUNT(DISTINCT note_images.id) > 0
         ORDER BY conversations.createdAt DESC

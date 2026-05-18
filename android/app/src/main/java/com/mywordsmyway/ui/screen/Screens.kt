@@ -470,6 +470,7 @@ fun WriteNoteScreen(
     var showUnlockDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteNoteDialog by rememberSaveable { mutableStateOf(false) }
     var sessionUnlocked by rememberSaveable(conversationId) { mutableStateOf(false) }
+    var hasLocalEdits by rememberSaveable(conversationId) { mutableStateOf(false) }
     var hasRecordPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
@@ -493,6 +494,7 @@ fun WriteNoteScreen(
         if (!suppressUndoCapture && (nextTitle != title || nextNote.text != noteField.text)) {
             noteUndoStack = (noteUndoStack + currentEditSnapshot()).takeLast(60)
             noteRedoStack = emptyList()
+            hasLocalEdits = true
         }
         title = nextTitle
         noteField = nextNote
@@ -566,12 +568,17 @@ fun WriteNoteScreen(
     LaunchedEffect(conversation?.id) {
         val loaded = conversation ?: return@LaunchedEffect
         if (loadedConversationId == loaded.id) return@LaunchedEffect
+        if (hasLocalEdits) {
+            loadedConversationId = loaded.id
+            return@LaunchedEffect
+        }
         suppressUndoCapture = true
         title = loaded.title.takeUnless { it == "Untitled reflection" || it == "Untitled note" }.orEmpty()
         noteField = TextFieldValue(loaded.finalNote, selection = TextRange(loaded.finalNote.length))
         noteUndoStack = emptyList()
         noteRedoStack = emptyList()
         loadedConversationId = loaded.id
+        hasLocalEdits = false
         suppressUndoCapture = false
     }
     fun applyFormat(format: NoteFormat) {
@@ -639,6 +646,7 @@ fun WriteNoteScreen(
                     error = ""
                     savedNotice = "Saved"
                     gemmaNotice = ""
+                    hasLocalEdits = false
                     if (navigateAfterSave) onSaved()
                 }
                 .onFailure {
@@ -852,6 +860,7 @@ fun WriteNoteScreen(
                     formatMenuOpen = false
                     attachmentMenuOpen = false
                     focusManager.clearFocus()
+                    saveNote(navigateAfterSave = false)
                 },
                 onSave = { saveNote(navigateAfterSave = true) },
                 modifier = Modifier
