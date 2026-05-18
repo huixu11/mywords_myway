@@ -44,7 +44,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyWordsTheme {
                 val calculationState by viewModel.borromeanCalculationUiState.collectAsState()
-                KeepScreenOn(keepOn = calculationState.isRunning)
+                val recordState = viewModel.recordUiState
+                KeepScreenOn(keepOn = calculationState.isRunning || recordState.isRecording)
                 MyWordsApp(viewModel = viewModel)
             }
         }

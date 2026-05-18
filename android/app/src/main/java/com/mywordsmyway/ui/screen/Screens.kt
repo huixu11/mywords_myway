@@ -457,6 +457,8 @@ fun WriteNoteScreen(
     var isAddingImage by rememberSaveable { mutableStateOf(false) }
     var isAddingFile by rememberSaveable { mutableStateOf(false) }
     var showDrawingPad by rememberSaveable { mutableStateOf(false) }
+    var showAudioRecorder by rememberSaveable { mutableStateOf(false) }
+    var insertNextRecordedAudio by rememberSaveable { mutableStateOf(false) }
     var showAudioList by rememberSaveable { mutableStateOf(false) }
     var showFindInNote by rememberSaveable { mutableStateOf(false) }
     var gemmaNotice by rememberSaveable { mutableStateOf("") }
@@ -466,6 +468,7 @@ fun WriteNoteScreen(
     var selectedFindIndex by rememberSaveable { mutableStateOf(0) }
     var showLockDialog by rememberSaveable { mutableStateOf(false) }
     var showUnlockDialog by rememberSaveable { mutableStateOf(false) }
+    var showDeleteNoteDialog by rememberSaveable { mutableStateOf(false) }
     var sessionUnlocked by rememberSaveable(conversationId) { mutableStateOf(false) }
     var hasRecordPermission by remember {
         mutableStateOf(
@@ -584,20 +587,36 @@ fun WriteNoteScreen(
         error = ""
         savedNotice = ""
     }
-    fun startAudioAttachment() {
-        attachmentMenuOpen = false
-        focusManager.clearFocus()
+    fun startFloatingRecorder() {
+        showAudioRecorder = true
         if (!hasRecordPermission) {
             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        } else if (recordState.isRecording) {
-            scope.launch {
-                viewModel.stopRecordingAndSave(conversationId)?.let { memoId ->
-                    insertIntoNote("\n[[audio:$memoId]]\n")
-                }
-            }
         } else {
             viewModel.startRecording()
         }
+    }
+    fun stopFloatingRecorder() {
+        scope.launch {
+            viewModel.stopRecordingAndSave(conversationId)?.let { memoId ->
+                if (insertNextRecordedAudio) {
+                    insertIntoNote("\n[[audio:$memoId]]\n")
+                    showAudioRecorder = false
+                }
+            }
+            insertNextRecordedAudio = false
+        }
+    }
+    fun cancelFloatingRecorder() {
+        viewModel.cancelRecording()
+        if (insertNextRecordedAudio) {
+            showAudioRecorder = false
+            insertNextRecordedAudio = false
+        }
+    }
+    fun startAudioAttachment() {
+        attachmentMenuOpen = false
+        showAudioRecorder = true
+        insertNextRecordedAudio = true
     }
     fun saveNote(navigateAfterSave: Boolean, allowEmptyBack: Boolean = false) {
         if (contentHidden) {
@@ -654,12 +673,29 @@ fun WriteNoteScreen(
         saveNote(navigateAfterSave = true, allowEmptyBack = true)
     }
     androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose { playbackController.release() }
+        onDispose {
+            playbackController.release()
+            insertNextRecordedAudio = false
+        }
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val bottomSafePadding = contentPadding.calculateBottomPadding()
-        val floatingControlsPadding = if (imeBottom > 0) imeBottomPadding + 72.dp else bottomSafePadding + 96.dp
+        val recorderVisible = !contentHidden && (showAudioRecorder || !showWritingToolbar || recordState.isRecording)
+        val recorderBarHeight = 90.dp
+        val recorderBottomPadding = if (imeBottom > 0) 8.dp else bottomSafePadding + 12.dp
+        val writingToolbarBottomPadding = if (showWritingToolbar && recorderVisible) {
+            recorderBarHeight + 20.dp
+        } else if (titleFocused || noteFocused) {
+            8.dp
+        } else {
+            bottomSafePadding + 12.dp
+        }
+        val floatingControlsPadding = when {
+            imeBottom > 0 && showWritingToolbar && recorderVisible -> imeBottomPadding + recorderBarHeight + 88.dp
+            imeBottom > 0 -> imeBottomPadding + 72.dp
+            else -> bottomSafePadding + 96.dp
+        }
         val visibleNoteEditorMinHeight = (maxHeight - 180.dp + floatingControlsPadding).coerceAtLeast(360.dp)
         LazyColumn(
             state = noteListState,
@@ -794,6 +830,7 @@ fun WriteNoteScreen(
                     }
                 },
                 canExportAudio = savedAudioMemos.isNotEmpty(),
+                showEditingDone = showWritingToolbar,
                 onFind = {
                     focusManager.clearFocus()
                     showFindInNote = true
@@ -808,6 +845,12 @@ fun WriteNoteScreen(
                             }
                             .onFailure { error = it.message ?: "Could not remove lock." }
                     }
+                },
+                onDeleteNote = { showDeleteNoteDialog = true },
+                onDoneEditing = {
+                    formatMenuOpen = false
+                    attachmentMenuOpen = false
+                    focusManager.clearFocus()
                 },
                 onSave = { saveNote(navigateAfterSave = true) },
                 modifier = Modifier
@@ -903,26 +946,28 @@ fun WriteNoteScreen(
                     .padding(
                         start = 16.dp,
                         end = 16.dp,
-                        bottom = if (titleFocused || noteFocused) 8.dp else contentPadding.calculateBottomPadding() + 12.dp,
+                        bottom = writingToolbarBottomPadding,
                     ),
             )
-        } else if (!contentHidden) {
+        }
+        if (recorderVisible) {
             FloatingRecorder(
                 recordState = recordState,
                 memoCount = savedAudioMemos.size,
                 totalDuration = totalDuration,
                 hasRecordPermission = hasRecordPermission,
                 onRequestPermission = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                onStart = { viewModel.startRecording() },
-                onStop = { scope.launch { viewModel.stopRecordingAndSave(conversationId) } },
-                onCancel = { viewModel.cancelRecording() },
+                onStart = ::startFloatingRecorder,
+                onStop = ::stopFloatingRecorder,
+                onCancel = ::cancelFloatingRecorder,
                 onOpenAudioList = { showAudioList = true },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    .imePadding()
                     .padding(
                         start = 16.dp,
                         end = 16.dp,
-                        bottom = contentPadding.calculateBottomPadding() + 12.dp,
+                        bottom = recorderBottomPadding,
                     ),
             )
         }
@@ -930,7 +975,7 @@ fun WriteNoteScreen(
 
     if (showAudioList) {
         AudioMemoListSheet(
-            memos = savedAudioMemos,
+            memos = memos,
             playbackState = playbackController.state,
             onDismiss = { showAudioList = false },
             onPlayPause = { memo -> playbackController.playOrPause(memo) },
@@ -938,6 +983,36 @@ fun WriteNoteScreen(
             onDeleteAudio = { memo ->
                 if (playbackController.state.memoId == memo.id) playbackController.stop()
                 scope.launch { viewModel.deleteMemoAudio(memo.id) }
+            },
+        )
+    }
+
+    if (showDeleteNoteDialog) {
+        val currentNote = conversation ?: ConversationEntity(
+            id = conversationId,
+            createdAt = java.time.Instant.now(),
+            title = title.ifBlank { "Untitled note" },
+            finalNote = noteField.text,
+            safetyStatus = "none",
+            paymentStatus = "free",
+            isFreeWeekly = true,
+            folderId = null,
+            isLocked = false,
+            passwordSalt = null,
+            passwordHash = null,
+        )
+        DeleteNoteConfirmationDialog(
+            note = currentNote,
+            onDismiss = { showDeleteNoteDialog = false },
+            onDelete = {
+                scope.launch {
+                    viewModel.deleteConversation(conversationId)
+                        .onSuccess {
+                            showDeleteNoteDialog = false
+                            onBack()
+                        }
+                        .onFailure { error = it.message ?: "Could not delete note." }
+                }
             },
         )
     }
@@ -4294,9 +4369,12 @@ private fun NoteTopBar(
     onShare: () -> Unit,
     onExportAudio: () -> Unit,
     canExportAudio: Boolean,
+    showEditingDone: Boolean,
     onFind: () -> Unit,
     onLock: () -> Unit,
     onRemoveLock: () -> Unit,
+    onDeleteNote: () -> Unit,
+    onDoneEditing: () -> Unit,
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -4361,10 +4439,36 @@ private fun NoteTopBar(
                             }
                         },
                     )
+                    DropdownMenuItem(
+                        text = { Text("Delete Note") },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                        onClick = {
+                            moreOpen = false
+                            onDeleteNote()
+                        },
+                    )
                 }
             }
-            TextButton(onClick = onSave) {
-                Text("Save")
+            if (showEditingDone) {
+                IconButton(onClick = onDoneEditing) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = "Done editing",
+                            modifier = Modifier
+                                .padding(7.dp)
+                                .size(18.dp),
+                        )
+                    }
+                }
+            } else {
+                TextButton(onClick = onSave) {
+                    Text("Save")
+                }
             }
         }
     }
@@ -5496,23 +5600,35 @@ private fun AudioMemoListSheet(
     onDeleteAudio: (VoiceMemoEntity) -> Unit,
 ) {
     var memoPendingDelete by remember { mutableStateOf<VoiceMemoEntity?>(null) }
+    val audioMemos = remember(memos) { memos.filter { it.audioPath != null } }
+    LaunchedEffect(memos, memoPendingDelete?.id) {
+        val pendingId = memoPendingDelete?.id ?: return@LaunchedEffect
+        if (memos.none { it.id == pendingId && it.audioPath != null }) {
+            memoPendingDelete = null
+        }
+    }
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Voice memos", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Text(
-                "${memos.size} saved - ${formatDuration(memos.sumOf { it.durationMillis ?: 0L })}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (memos.isEmpty()) {
-                Text("No saved audio in this note.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            item {
+                Text("Voice memos", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${audioMemos.size} saved - ${formatDuration(audioMemos.sumOf { it.durationMillis ?: 0L })}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (audioMemos.isEmpty()) {
+                item {
+                    Text("No saved audio in this note.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             } else {
-                memos.forEachIndexed { index, memo ->
+                itemsIndexed(memos, key = { _, memo -> memo.id }) { index, memo ->
                     if (memo.audioPath != null) {
                         SwipeToDeleteRow(
                             contentDescription = "Delete memo audio",
@@ -5541,7 +5657,7 @@ private fun AudioMemoListSheet(
                     }
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            item { Spacer(Modifier.height(12.dp)) }
         }
     }
     memoPendingDelete?.let { memo ->
