@@ -1755,6 +1755,10 @@ fun NotesScreen(
     val topHits = remember(searchResults, query) { if (query.isBlank()) emptyList() else searchResults.take(3) }
     var notePendingDelete by remember { mutableStateOf<ConversationEntity?>(null) }
     var folderPendingDelete by remember { mutableStateOf<NoteFolderWithCount?>(null) }
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    val imeBottomPadding = with(density) { imeBottom.toDp() }
+    val searchBarBottomPadding = if (imeBottom > 0) imeBottomPadding + 112.dp else contentPadding.calculateBottomPadding() + 112.dp
     fun updateFolderDropTarget(position: Offset?) {
         dragPosition = position
         val source = draggingFolder ?: run {
@@ -1806,7 +1810,7 @@ fun NotesScreen(
                 .padding(horizontal = 20.dp),
             contentPadding = PaddingValues(
                 top = contentPadding.calculateTopPadding() + 24.dp,
-                bottom = contentPadding.calculateBottomPadding() + 112.dp,
+                bottom = searchBarBottomPadding,
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -1943,10 +1947,11 @@ fun NotesScreen(
             onCreateNote = ::createNoteInCurrentFolder,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .imePadding()
                 .padding(
                     start = 16.dp,
                     end = 16.dp,
-                    bottom = contentPadding.calculateBottomPadding() + 12.dp,
+                    bottom = if (imeBottom > 0) 0.dp else contentPadding.calculateBottomPadding() + 12.dp,
                 ),
         )
         if (draggingFolder != null && dragPosition != null) {
