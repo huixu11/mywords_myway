@@ -615,6 +615,7 @@ fun WriteNoteScreen(
     }
     fun startAudioAttachment() {
         attachmentMenuOpen = false
+        focusManager.clearFocus()
         showAudioRecorder = true
         insertNextRecordedAudio = true
     }
@@ -681,7 +682,7 @@ fun WriteNoteScreen(
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val bottomSafePadding = contentPadding.calculateBottomPadding()
-        val recorderVisible = !contentHidden && (showAudioRecorder || !showWritingToolbar || recordState.isRecording)
+        val recorderVisible = !contentHidden && (!showWritingToolbar || recordState.isRecording)
         val recorderBarHeight = 90.dp
         val recorderBottomPadding = if (imeBottom > 0) 8.dp else bottomSafePadding + 12.dp
         val writingToolbarBottomPadding = if (showWritingToolbar && recorderVisible) {
